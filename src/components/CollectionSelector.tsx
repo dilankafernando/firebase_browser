@@ -64,8 +64,34 @@ const CollectionSelector: React.FC = () => {
     ? filteredCollections 
     : filteredCollections.slice(0, 10);
   
-  const handleChange = (event: SelectChangeEvent) => {
-    setSelectedCollection(event.target.value);
+  // Add a dedicated function to close the dropdown
+  const closeDropdown = () => {
+    try {
+      // Approach 1: Directly blur the active element
+      (document.activeElement as HTMLElement)?.blur();
+      
+      // Approach 2: Find and blur the select element
+      const selectElement = document.getElementById('collection-select');
+      if (selectElement) {
+        (selectElement as HTMLElement).blur();
+      }
+      
+      // Approach 3: Click elsewhere on the page to force dropdown to close
+      setTimeout(() => {
+        // Create and trigger a click event outside the dropdown area
+        document.body.click();
+      }, 10);
+    } catch (e) {
+      console.error('Error closing dropdown:', e);
+    }
+  };
+
+  // Define handleChange function
+  const handleChange = (event: SelectChangeEvent<string>) => {
+    const value = event.target.value;
+    // Explicitly set the selected collection in the store
+    setSelectedCollection(value);
+    closeDropdown();
   };
 
   const handleRefresh = () => {
@@ -102,16 +128,44 @@ const CollectionSelector: React.FC = () => {
               You can still use the {collections.length} collections that were loaded:
             </Typography>
             <FormControl fullWidth variant="outlined">
-              <InputLabel id="collection-select-label">Select Collection</InputLabel>
+              <InputLabel id="error-collection-select-label">Select Collection</InputLabel>
               <Select
-                labelId="collection-select-label"
-                id="collection-select"
+                labelId="error-collection-select-label"
+                id="error-collection-select"
                 value={selectedCollection}
                 onChange={handleChange}
+                onClose={() => {
+                  setTimeout(() => {
+                    (document.activeElement as HTMLElement)?.blur();
+                  }, 10);
+                }}
                 label="Select Collection"
+                MenuProps={{
+                  PaperProps: {
+                    style: { maxHeight: 500 },
+                  },
+                  autoFocus: false,
+                  disableAutoFocusItem: true,
+                  disablePortal: true,
+                  anchorOrigin: {
+                    vertical: 'bottom',
+                    horizontal: 'left',
+                  },
+                  transformOrigin: {
+                    vertical: 'top',
+                    horizontal: 'left',
+                  },
+                }}
               >
                 {collections.map((collection) => (
-                  <MenuItem key={collection} value={collection}>
+                  <MenuItem 
+                    key={collection} 
+                    value={collection}
+                    onClick={() => {
+                      setSelectedCollection(collection);
+                      closeDropdown();
+                    }}
+                  >
                     {collection}
                   </MenuItem>
                 ))}
@@ -195,6 +249,12 @@ const CollectionSelector: React.FC = () => {
           id="collection-select"
           value={selectedCollection}
           onChange={handleChange}
+          onClose={() => {
+            // Additional callback to ensure closing
+            setTimeout(() => {
+              (document.activeElement as HTMLElement)?.blur();
+            }, 10);
+          }}
           label="Select Collection"
           disabled={isLoading || collections.length === 0}
           startAdornment={
@@ -202,6 +262,26 @@ const CollectionSelector: React.FC = () => {
             <CircularProgress size={20} color="inherit" sx={{ mr: 1 }} /> : 
             null
           }
+          MenuProps={{
+            PaperProps: {
+              style: { maxHeight: 500 },
+            },
+            autoFocus: false,
+            disableAutoFocusItem: true,
+            disablePortal: true,
+            // Ensure menu closes properly after selection
+            anchorOrigin: {
+              vertical: 'bottom',
+              horizontal: 'left',
+            },
+            transformOrigin: {
+              vertical: 'top',
+              horizontal: 'left',
+            },
+          }}
+          inputProps={{
+            'data-testid': 'collection-select',
+          }}
         >
           {filteredCollections.length === 0 && !isLoading ? (
             <MenuItem disabled value="">
@@ -213,7 +293,14 @@ const CollectionSelector: React.FC = () => {
               {topLevelCollections
                 .filter(collection => collection.toLowerCase().includes(searchTerm.toLowerCase()))
                 .map((collection) => (
-                  <MenuItem key={collection} value={collection}>
+                  <MenuItem 
+                    key={collection} 
+                    value={collection}
+                    onClick={() => {
+                      setSelectedCollection(collection);
+                      closeDropdown();
+                    }}
+                  >
                     {collection}
                   </MenuItem>
                 ))
@@ -232,7 +319,14 @@ const CollectionSelector: React.FC = () => {
                   // For subcollections, format them to show the path clearly
                   const parts = collection.split('/');
                   return (
-                    <MenuItem key={collection} value={collection}>
+                    <MenuItem 
+                      key={collection} 
+                      value={collection}
+                      onClick={() => {
+                        setSelectedCollection(collection);
+                        closeDropdown();
+                      }}
+                    >
                       <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                         <Typography variant="body2">{parts[2]}</Typography>
                         <Typography variant="caption" color="text.secondary">
@@ -280,7 +374,10 @@ const CollectionSelector: React.FC = () => {
                   size="small"
                   variant="outlined"
                   clickable
-                  onClick={() => setSelectedCollection(coll)}
+                  onClick={() => {
+                    setSelectedCollection(coll);
+                    closeDropdown();
+                  }}
                   color={selectedCollection === coll ? "primary" : "default"}
                   title={coll}
                 />

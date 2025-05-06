@@ -62,7 +62,7 @@ import {
   collection, 
   serverTimestamp 
 } from 'firebase/firestore';
-import { db } from '../firebase';
+import { getDb } from '../services/firebaseService';
 
 // Styled components for bordered table
 const StyledTableCell = styled(TableCell)(({ theme }) => ({
@@ -383,7 +383,7 @@ const DataTable: React.FC = () => {
         idToUse = null; // We'll get the actual ID from the addDoc response
       }
       
-      const docRef = await addDoc(collection(db, selectedCollection), rowToAdd);
+      const docRef = await addDoc(collection(getDb(), selectedCollection), rowToAdd);
       
       // Create a complete record with the new ID for local state update
       const newRecord = {
@@ -414,7 +414,7 @@ const DataTable: React.FC = () => {
     if (!selectedCollection) return;
     
     try {
-      const docRef = doc(db, selectedCollection, rowId);
+      const docRef = doc(getDb(), selectedCollection, rowId);
       
       // Add updated timestamp
       const dataToUpdate = {
@@ -456,7 +456,7 @@ const DataTable: React.FC = () => {
     if (!selectedCollection) return;
     
     try {
-      const docRef = doc(db, selectedCollection, rowId);
+      const docRef = doc(getDb(), selectedCollection, rowId);
       
       // Create update object with just the cell being updated
       const updateData: Record<string, any> = { 
@@ -493,7 +493,7 @@ const DataTable: React.FC = () => {
     if (!selectedCollection) return;
     
     try {
-      const docRef = doc(db, selectedCollection, rowId);
+      const docRef = doc(getDb(), selectedCollection, rowId);
       await deleteDoc(docRef);
       
       // Update local state immediately so the UI reflects the deletion

@@ -5,7 +5,8 @@ import {
   Typography, 
   Container, 
   Box,
-  Alert
+  Alert,
+  Chip
 } from '@mui/material';
 import { useStore } from '../store';
 
@@ -14,15 +15,24 @@ interface LayoutProps {
 }
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
-  const { error } = useStore();
+  const { error, user, activeConfig } = useStore();
 
   return (
     <>
       <AppBar position="static">
         <Toolbar>
-          <Typography variant="h6" component="div">
+          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
             Firebase Browser
           </Typography>
+          {user && activeConfig && (
+            <Chip 
+              label={`${activeConfig.displayName} (${activeConfig.projectId})`}
+              color="secondary" 
+              variant="outlined"
+              size="small"
+              sx={{ color: 'white', mr: 2 }}
+            />
+          )}
         </Toolbar>
       </AppBar>
       <Container maxWidth="lg">

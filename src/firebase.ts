@@ -1,21 +1,10 @@
-import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { Firestore } from 'firebase/firestore';
+import { getDb } from './services/firebaseService';
 
-// Your Firebase configuration
-// Replace these values with your actual Firebase project config
-const firebaseConfig = {
-  apiKey: "AIzaSyB-YkQPdjlPLysFgNk7NbT6r4EK7OdIZO4",
-  authDomain: "lionmenu-7bd79.firebaseapp.com",
-  projectId: "lionmenu-7bd79",
-  storageBucket: "lionmenu-7bd79.appspot.com",
-  messagingSenderId: "984918116721",
-  appId: "1:984918116721:web:1acd535878d72337e84ed0"
+// Export a function to get the current db instance
+export const getFirestore = (): Firestore | null => {
+  return getDb();
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-
-// Initialize Firestore
-const db = getFirestore(app);
-
-export { db }; 
+// For backward compatibility with existing code
+export const db = getDb(); 

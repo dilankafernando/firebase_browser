@@ -1,10 +1,13 @@
 import { collection, getDocs, getDoc, doc, query, limit } from 'firebase/firestore';
-import { db } from '../firebase';
+import { getDb } from './firebaseService';
 import { FirestoreData } from '../store';
 
 // Get all collections from Firestore
 export const getCollections = async (): Promise<string[]> => {
   try {
+    const db = getDb();
+    if (!db) throw new Error('No active Firebase connection');
+    
     const collectionsSet = new Set<string>();
     
     // Set a timeout for the collection discovery process
@@ -159,6 +162,9 @@ export const getCollections = async (): Promise<string[]> => {
 // Get documents from a specific collection
 export const getDocuments = async (collectionName: string): Promise<FirestoreData[]> => {
   try {
+    const db = getDb();
+    if (!db) throw new Error('No active Firebase connection');
+    
     // Handle subcollection paths (format: "parentColl/docId/subcoll")
     const pathSegments = collectionName.split('/');
     let querySnapshot;
@@ -193,6 +199,9 @@ export const getDocuments = async (collectionName: string): Promise<FirestoreDat
 // Get a specific document by ID
 export const getDocumentById = async (collectionName: string, documentId: string): Promise<FirestoreData | null> => {
   try {
+    const db = getDb();
+    if (!db) throw new Error('No active Firebase connection');
+    
     // Handle subcollection paths
     const pathSegments = collectionName.split('/');
     let docRef;

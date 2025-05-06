@@ -13,11 +13,14 @@ export const useCollections = () => {
     queryFn: getCollections,
     refetchOnWindowFocus: false,
     staleTime: 5 * 60 * 1000, // Consider data fresh for 5 minutes
+    retry: 1, // Only retry once to avoid too many requests
+    retryDelay: 1000, // Wait 1 second before retrying
     onSuccess: (data) => {
       setCollections(data);
       setError(null);
     },
     onError: (error: Error) => {
+      console.error('Collection fetch error:', error);
       setError(error.message);
     },
     onSettled: () => {
@@ -41,6 +44,7 @@ export const useCollectionData = (collectionName: string) => {
       setError(null);
     },
     onError: (error: Error) => {
+      console.error(`Error fetching collection ${collectionName}:`, error);
       setError(error.message);
     },
     onSettled: () => {

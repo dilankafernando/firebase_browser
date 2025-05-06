@@ -35,6 +35,7 @@ import {
   DialogActions,
   Card,
   CardContent,
+  Snackbar,
 } from '@mui/material';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
@@ -53,6 +54,15 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useStore } from '../store';
 import { useCollectionData } from '../hooks/useFirestore';
 import { FirestoreData } from '../store';
+import { 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  collection, 
+  serverTimestamp 
+} from 'firebase/firestore';
+import { db } from '../firebase';
 
 // Styled components for bordered table
 const StyledTableCell = styled(TableCell)(({ theme }) => ({
@@ -136,6 +146,18 @@ const DataTable: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('table');
   const [selectedRecord, setSelectedRecord] = useState<FirestoreData | null>(null);
   const [isJsonDetailOpen, setIsJsonDetailOpen] = useState(false);
+
+  // Data manipulation state
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editableRow, setEditableRow] = useState<FirestoreData | null>(null);
+  const [editableCell, setEditableCell] = useState<{rowId: string, field: string, value: any} | null>(null);
+  const [isAddMode, setIsAddMode] = useState(false);
+  const [newRow, setNewRow] = useState<Record<string, any>>({ id: '' });
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [rowToDelete, setRowToDelete] = useState<FirestoreData | null>(null);
+  const [isConfirmationOpen, setIsConfirmationOpen] = useState(false);
+  const [confirmationMessage, setConfirmationMessage] = useState('');
+  const [pendingAction, setPendingAction] = useState<(() => Promise<void>) | null>(null);
 
   // Reset page when collection changes
   useEffect(() => {
@@ -341,6 +363,155 @@ const DataTable: React.FC = () => {
       .catch(err => {
         console.error('Failed to copy: ', err);
       });
+  };
+
+  // Database operation handlers
+  const handleAddRow = async () => {
+    if (!selectedCollection) return;
+    
+    try {
+      // Add created timestamp
+      const rowToAdd = {
+        ...newRow,
+        createdAt: serverTimestamp(),
+      };
+      
+      // Remove empty id if it wasn't provided (Firestore will generate one)
+      let idToUse = newRow.id;
+      if (!newRow.id || newRow.id.trim() === '') {
+        delete rowToAdd.id;
+        idToUse = null; // We'll get the actual ID from the addDoc response
+      }
+      
+      const docRef = await addDoc(collection(db, selectedCollection), rowToAdd);
+      
+      // Create a complete record with the new ID for local state update
+      const newRecord = {
+        ...rowToAdd,
+        id: idToUse || docRef.id,
+        createdAt: new Date() // Use a JS Date object for the local state
+      };
+      
+      // Update local state immediately so the UI reflects the addition
+      setFilteredData(prevData => [...prevData, newRecord]);
+      
+      // Show confirmation
+      setConfirmationMessage('Document added successfully');
+      setIsConfirmationOpen(true);
+      
+      // Reset form
+      setIsAddMode(false);
+      setNewRow({ id: '' });
+      
+    } catch (error) {
+      console.error('Error adding document:', error);
+      setConfirmationMessage(`Error adding document: ${error instanceof Error ? error.message : String(error)}`);
+      setIsConfirmationOpen(true);
+    }
+  };
+
+  const handleUpdateRow = async (rowId: string, updatedData: Record<string, any>) => {
+    if (!selectedCollection) return;
+    
+    try {
+      const docRef = doc(db, selectedCollection, rowId);
+      
+      // Add updated timestamp
+      const dataToUpdate = {
+        ...updatedData,
+        updatedAt: serverTimestamp(),
+      };
+      
+      // Remove the id field as it shouldn't be updated
+      delete dataToUpdate.id;
+      
+      await updateDoc(docRef, dataToUpdate);
+      
+      // Update local state immediately so the UI reflects the change
+      setFilteredData(prevData => 
+        prevData.map(item => 
+          item.id === rowId 
+            ? { ...item, ...dataToUpdate, updatedAt: new Date() } 
+            : item
+        )
+      );
+      
+      // Show confirmation
+      setConfirmationMessage('Document updated successfully');
+      setIsConfirmationOpen(true);
+      
+      // Reset edit mode
+      setIsEditMode(false);
+      setEditableRow(null);
+      setEditableCell(null);
+      
+    } catch (error) {
+      console.error('Error updating document:', error);
+      setConfirmationMessage(`Error updating document: ${error instanceof Error ? error.message : String(error)}`);
+      setIsConfirmationOpen(true);
+    }
+  };
+
+  const handleUpdateCell = async (rowId: string, field: string, value: any) => {
+    if (!selectedCollection) return;
+    
+    try {
+      const docRef = doc(db, selectedCollection, rowId);
+      
+      // Create update object with just the cell being updated
+      const updateData: Record<string, any> = { 
+        [field]: value,
+        updatedAt: serverTimestamp()
+      };
+      
+      await updateDoc(docRef, updateData);
+      
+      // Update local state immediately so the UI reflects the change
+      setFilteredData(prevData => 
+        prevData.map(item => 
+          item.id === rowId 
+            ? { ...item, [field]: value, updatedAt: new Date() } 
+            : item
+        )
+      );
+      
+      // Show confirmation
+      setConfirmationMessage(`Field "${field}" updated successfully`);
+      setIsConfirmationOpen(true);
+      
+      // Reset edit mode
+      setEditableCell(null);
+      
+    } catch (error) {
+      console.error('Error updating cell:', error);
+      setConfirmationMessage(`Error updating cell: ${error instanceof Error ? error.message : String(error)}`);
+      setIsConfirmationOpen(true);
+    }
+  };
+
+  const handleDeleteRow = async (rowId: string) => {
+    if (!selectedCollection) return;
+    
+    try {
+      const docRef = doc(db, selectedCollection, rowId);
+      await deleteDoc(docRef);
+      
+      // Update local state immediately so the UI reflects the deletion
+      setFilteredData(prevData => prevData.filter(item => item.id !== rowId));
+      
+      // Show confirmation
+      setConfirmationMessage('Document deleted successfully');
+      setIsConfirmationOpen(true);
+      
+      // Reset delete dialog
+      setIsDeleteDialogOpen(false);
+      setRowToDelete(null);
+      
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      setConfirmationMessage(`Error deleting document: ${error instanceof Error ? error.message : String(error)}`);
+      setIsConfirmationOpen(true);
+    }
   };
 
   if (!selectedCollection) {
@@ -701,6 +872,49 @@ const DataTable: React.FC = () => {
         )}
       </Box>
 
+      {/* Add Row Button */}
+      <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
+        <Button 
+          variant="contained" 
+          color="primary" 
+          startIcon={<AddIcon />}
+          onClick={() => {
+            // Initialize empty document with all possible fields
+            const emptyDoc: Record<string, any> = { id: '' };
+            columns.forEach(col => {
+              if (col !== 'id') {
+                emptyDoc[col] = '';
+              }
+            });
+            setNewRow(emptyDoc);
+            setIsAddMode(true);
+          }}
+        >
+          Add Document
+        </Button>
+      </Box>
+
+      {/* Table Instructions */}
+      <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: 'info.50' }}>
+        <Typography variant="subtitle2" color="info.main" gutterBottom>
+          <strong>Edit Data Instructions:</strong>
+        </Typography>
+        <Box component="ul" sx={{ pl: 2, m: 0 }}>
+          <Box component="li">
+            <Typography variant="body2">Double-click any cell to edit its value</Typography>
+          </Box>
+          <Box component="li">
+            <Typography variant="body2">Press Enter or click outside to save changes</Typography>
+          </Box>
+          <Box component="li">
+            <Typography variant="body2">Use the Delete button to remove a document</Typography>
+          </Box>
+          <Box component="li">
+            <Typography variant="body2">Click "Add Document" to create a new document</Typography>
+          </Box>
+        </Box>
+      </Paper>
+
       {/* Main content - Table or JSON view based on viewMode */}
       {viewMode === 'table' ? (
         <TableContainer 
@@ -708,10 +922,28 @@ const DataTable: React.FC = () => {
           sx={{ 
             width: '100%',
             overflow: 'auto',
+            maxHeight: '70vh', // Limit the height for better usability
             border: (theme) => `1px solid ${theme.palette.divider}`,
+            position: 'relative', // Important for sticky positioning context
+            '&::-webkit-scrollbar': {
+              height: '8px',
+              width: '8px',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: 'rgba(0,0,0,0.2)',
+              borderRadius: '4px',
+            },
           }}
         >
-          <Table sx={{ width: '100%' }} aria-label="firestore data table">
+          <Table 
+            sx={{ 
+              width: '100%',
+              tableLayout: 'auto',
+              borderCollapse: 'separate',
+              borderSpacing: 0
+            }} 
+            aria-label="firestore data table"
+          >
             <TableHead>
               <StyledTableRow>
                 {columns.map((column) => (
@@ -729,7 +961,11 @@ const DataTable: React.FC = () => {
                   sx={{ 
                     fontWeight: 'bold',
                     backgroundColor: (theme) => theme.palette.action.hover,
-                    width: 80 
+                    width: 80,
+                    position: 'sticky',
+                    right: 0,
+                    zIndex: 3,
+                    boxShadow: '-2px 0px 5px rgba(0,0,0,0.1)'
                   }}
                 >
                   Actions
@@ -752,17 +988,121 @@ const DataTable: React.FC = () => {
                   <StyledTableRow key={row.id}>
                     {columns.map((column) => (
                       <StyledTableCell key={`${row.id}-${column}`}>
-                        {formatCellData(row[column])}
+                        {editableCell && editableCell.rowId === row.id && editableCell.field === column ? (
+                          // Editable cell
+                          <TextField
+                            size="small"
+                            fullWidth
+                            variant="standard"
+                            value={editableCell.value}
+                            onChange={(e) => setEditableCell({...editableCell, value: e.target.value})}
+                            onBlur={() => {
+                              try {
+                                handleUpdateCell(editableCell.rowId, editableCell.field, editableCell.value);
+                              } catch (error) {
+                                console.error('Error saving cell:', error);
+                                setConfirmationMessage(`Error: ${error instanceof Error ? error.message : String(error)}`);
+                                setIsConfirmationOpen(true);
+                              }
+                            }}
+                            onKeyPress={(e) => {
+                              if (e.key === 'Enter') {
+                                try {
+                                  handleUpdateCell(editableCell.rowId, editableCell.field, editableCell.value);
+                                } catch (error) {
+                                  console.error('Error saving cell:', error);
+                                  setConfirmationMessage(`Error: ${error instanceof Error ? error.message : String(error)}`);
+                                  setIsConfirmationOpen(true);
+                                }
+                              }
+                            }}
+                            autoFocus
+                            sx={{
+                              '& .MuiInput-underline:before': { borderBottomColor: 'primary.main' },
+                              '& .MuiInput-underline:after': { borderBottomColor: 'primary.main' },
+                              '& .MuiInput-root': { backgroundColor: 'rgba(66, 165, 245, 0.05)' }
+                            }}
+                            InputProps={{
+                              endAdornment: (
+                                <InputAdornment position="end">
+                                  <Tooltip title="Press Enter to save">
+                                    <span>✓</span>
+                                  </Tooltip>
+                                </InputAdornment>
+                              )
+                            }}
+                          />
+                        ) : (
+                          // Display cell with double-click to edit
+                          <Box 
+                            onDoubleClick={() => {
+                              if (column !== 'id') { // Don't allow editing of ID field
+                                setEditableCell({
+                                  rowId: row.id,
+                                  field: column,
+                                  value: row[column] || ''
+                                });
+                              }
+                            }}
+                            sx={{ 
+                              minHeight: '1.5rem',
+                              padding: '4px',
+                              position: 'relative',
+                              cursor: column !== 'id' ? 'pointer' : 'default',
+                              '&:hover': {
+                                backgroundColor: column !== 'id' ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
+                                '&::after': column !== 'id' ? {
+                                  content: '"✎"',
+                                  position: 'absolute',
+                                  right: '4px',
+                                  top: '4px',
+                                  fontSize: '10px',
+                                  color: 'primary.main',
+                                  opacity: 0.7
+                                } : {}
+                              },
+                              borderRadius: '4px',
+                              transition: 'background-color 0.2s',
+                              display: 'flex',
+                              alignItems: 'center',
+                            }}
+                          >
+                            {formatCellData(row[column])}
+                          </Box>
+                        )}
                       </StyledTableCell>
                     ))}
-                    <StyledTableCell>
-                      <IconButton
-                        size="small"
-                        onClick={() => handleOpenJsonDetail(row)}
-                        title="View JSON"
-                      >
-                        <OpenInNewIcon fontSize="small" />
-                      </IconButton>
+                    <StyledTableCell
+                      sx={{
+                        position: 'sticky',
+                        right: 0,
+                        zIndex: 2,
+                        background: (theme) => theme.palette.background.paper,
+                        boxShadow: '-2px 0px 5px rgba(0,0,0,0.1)'
+                      }}
+                    >
+                      <Box sx={{ display: 'flex', gap: 0.5 }}>
+                        <Tooltip title="View JSON">
+                          <IconButton
+                            size="small"
+                            onClick={() => handleOpenJsonDetail(row)}
+                          >
+                            <OpenInNewIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Delete Row">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => {
+                              setRowToDelete(row);
+                              setIsDeleteDialogOpen(true);
+                            }}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
                     </StyledTableCell>
                   </StyledTableRow>
                 ))
@@ -887,6 +1227,95 @@ const DataTable: React.FC = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Add Document Dialog */}
+      <Dialog
+        open={isAddMode}
+        onClose={() => setIsAddMode(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">Add New Document</Typography>
+            <IconButton
+              aria-label="close"
+              onClick={() => setIsAddMode(false)}
+              size="small"
+            >
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Box component="form" sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+            {Object.keys(newRow).map(field => (
+              <TextField
+                key={field}
+                label={field}
+                value={newRow[field] || ''}
+                onChange={(e) => setNewRow({...newRow, [field]: e.target.value})}
+                fullWidth
+                disabled={field === 'id' && field.trim() === ''}
+                helperText={field === 'id' ? 'Leave empty for auto-generated ID' : ''}
+              />
+            ))}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsAddMode(false)}>Cancel</Button>
+          <Button 
+            onClick={handleAddRow} 
+            variant="contained" 
+            color="primary"
+          >
+            Add Document
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={isDeleteDialogOpen}
+        onClose={() => setIsDeleteDialogOpen(false)}
+      >
+        <DialogTitle>Confirm Delete</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to delete the document with ID: <strong>{rowToDelete?.id}</strong>?
+          </Typography>
+          <Typography color="error" variant="body2" sx={{ mt: 2 }}>
+            This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsDeleteDialogOpen(false)}>Cancel</Button>
+          <Button 
+            onClick={() => rowToDelete && handleDeleteRow(rowToDelete.id)} 
+            color="error" 
+            variant="contained"
+          >
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Success/Error Notification */}
+      <Snackbar
+        open={isConfirmationOpen}
+        autoHideDuration={5000}
+        onClose={() => setIsConfirmationOpen(false)}
+        message={confirmationMessage}
+        action={
+          <IconButton
+            size="small"
+            color="inherit"
+            onClick={() => setIsConfirmationOpen(false)}
+          >
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        }
+      />
     </Box>
   );
 };

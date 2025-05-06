@@ -1,0 +1,22 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Roboto', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:root {
+  --max-width: 1280px;
+  --margin-inline: auto;
+}
+
+.container {
+  max-width: var(--max-width);
+  margin-inline: var(--margin-inline);
+  padding: 1rem;
+} 

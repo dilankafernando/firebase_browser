@@ -50,6 +50,9 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import CloseIcon from '@mui/icons-material/Close';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import FormatAlignLeftIcon from '@mui/icons-material/FormatAlignLeft';
+import EditIcon from '@mui/icons-material/Edit';
 import { useStore } from '../store';
 import { useCollectionData } from '../hooks/useFirestore';
 import { FirestoreData } from '../store';
@@ -110,6 +113,17 @@ const FILTER_OPERATORS: { value: FilterOperator; label: string }[] = [
   { value: 'lessThan', label: 'Less Than' },
 ];
 
+// Check if a string is valid JSON
+const isJsonString = (str: string): boolean => {
+  if (typeof str !== 'string') return false;
+  try {
+    const result = JSON.parse(str);
+    return typeof result === 'object' && result !== null;
+  } catch (e) {
+    return false;
+  }
+};
+
 // Format JSON with syntax highlighting - completely rewritten to use a simpler approach
 const formatJson = (obj: any): string => {
   if (!obj) return '';
@@ -127,6 +141,11 @@ const formatJson = (obj: any): string => {
     .replace(/: (true|false)/g, ': <span style="color: #f44336;">$1</span>')
     .replace(/: (null)/g, ': <span style="color: #9e9e9e;">$1</span>')
     .replace(/: (-?\d+\.?\d*)/g, ': <span style="color: #ff9800;">$1</span>');
+};
+
+// Truncate long strings
+const truncateString = (str: string, maxLength = 50): string => {
+  return str.length > maxLength ? `${str.substring(0, maxLength)}...` : str;
 };
 
 const DataTable: React.FC = () => {
@@ -156,6 +175,10 @@ const DataTable: React.FC = () => {
   const [isConfirmationOpen, setIsConfirmationOpen] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState('');
   const [pendingAction, setPendingAction] = useState<(() => Promise<void>) | null>(null);
+
+  // Add state for JSON cell display
+  const [expandedJsonCells, setExpandedJsonCells] = useState<Set<string>>(new Set());
+  const [jsonEditCell, setJsonEditCell] = useState<{rowId: string, field: string, value: any} | null>(null);
 
   // Reset page when collection changes
   useEffect(() => {
@@ -277,14 +300,118 @@ const DataTable: React.FC = () => {
   }, [data]);
 
   // Format cell data appropriately based on type
-  const formatCellData = (value: any) => {
+  const formatCellData = (value: any, rowId: string, field: string): React.ReactNode => {
     if (value === null || value === undefined) {
       return '';
-    } else if (typeof value === 'object') {
-      return JSON.stringify(value);
-    } else {
-      return String(value);
+    } 
+    
+    // Handle objects (including arrays)
+    if (typeof value === 'object') {
+      const jsonStr = JSON.stringify(value, null, 2);
+      const cellId = `${rowId}-${field}`;
+      const isExpanded = expandedJsonCells.has(cellId);
+      
+      return (
+        <Box sx={{ position: 'relative', width: '100%' }}>
+          {isExpanded ? (
+            <JsonDisplay 
+              dangerouslySetInnerHTML={{ __html: formatJson(value) }}
+              sx={{ 
+                maxHeight: '200px', 
+                overflow: 'auto', 
+                cursor: 'default',
+                fontSize: '0.75rem',
+                p: 1,
+                border: '1px solid #e0e0e0',
+                borderRadius: 1,
+                backgroundColor: '#fafafa',
+              }}
+            />
+          ) : (
+            <Typography 
+              variant="body2" 
+              sx={{ 
+                overflow: 'hidden', 
+                textOverflow: 'ellipsis', 
+                whiteSpace: 'nowrap',
+                maxWidth: '300px',
+                cursor: 'pointer',
+                '&:hover': { 
+                  color: 'primary.main',
+                  textDecoration: 'underline' 
+                }
+              }}
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent cell edit mode
+                const newSet = new Set(expandedJsonCells);
+                newSet.add(cellId);
+                setExpandedJsonCells(newSet);
+              }}
+            >
+              {truncateString(jsonStr, 50)}
+            </Typography>
+          )}
+          <Box 
+            sx={{ 
+              position: 'absolute', 
+              top: 0, 
+              right: 0, 
+              display: 'flex', 
+              gap: 0.5 
+            }}
+          >
+            <IconButton 
+              size="small" 
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent cell edit mode
+                const newSet = new Set(expandedJsonCells);
+                if (isExpanded) {
+                  newSet.delete(cellId);
+                } else {
+                  newSet.add(cellId);
+                }
+                setExpandedJsonCells(newSet);
+              }}
+              sx={{ p: 0.5 }}
+            >
+              {isExpanded ? 
+                <ExpandLessIcon fontSize="small" /> : 
+                <ExpandMoreIcon fontSize="small" />}
+            </IconButton>
+            <IconButton 
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent cell edit mode
+                setJsonEditCell({
+                  rowId,
+                  field,
+                  value: JSON.stringify(value, null, 2)
+                });
+              }}
+              sx={{ p: 0.5 }}
+              title="Edit JSON"
+            >
+              <EditIcon fontSize="small" />
+            </IconButton>
+          </Box>
+        </Box>
+      );
     }
+    
+    // Handle string that contains JSON
+    if (typeof value === 'string' && isJsonString(value)) {
+      try {
+        const jsonObj = JSON.parse(value);
+        // Use the object handling for valid JSON strings
+        return formatCellData(jsonObj, rowId, field);
+      } catch (e) {
+        // If parsing fails, just return the string
+        return String(value);
+      }
+    }
+    
+    // Default for all other types
+    return String(value);
   };
 
   // Add new filter
@@ -512,6 +639,25 @@ const DataTable: React.FC = () => {
     } catch (error) {
       console.error('Error deleting document:', error);
       setConfirmationMessage(`Error deleting document: ${error instanceof Error ? error.message : String(error)}`);
+      setIsConfirmationOpen(true);
+    }
+  };
+
+  // Add function to handle JSON edit save
+  const handleSaveJsonEdit = async () => {
+    if (!jsonEditCell) return;
+    
+    try {
+      // Validate that the edited string is valid JSON
+      const parsedJson = JSON.parse(jsonEditCell.value);
+      
+      // Update the cell with the parsed object
+      await handleUpdateCell(jsonEditCell.rowId, jsonEditCell.field, parsedJson);
+      
+      // Reset JSON edit state
+      setJsonEditCell(null);
+    } catch (error) {
+      setConfirmationMessage(`Invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
       setIsConfirmationOpen(true);
     }
   };
@@ -1039,11 +1185,26 @@ const DataTable: React.FC = () => {
                           <Box 
                             onDoubleClick={() => {
                               if (column !== 'id') { // Don't allow editing of ID field
-                                setEditableCell({
-                                  rowId: row.id,
-                                  field: column,
-                                  value: row[column] || ''
-                                });
+                                // Check if we're dealing with an object/JSON
+                                if (typeof row[column] === 'object' || 
+                                    (typeof row[column] === 'string' && isJsonString(row[column]))) {
+                                  // For JSON data, open the JSON editor
+                                  const value = typeof row[column] === 'object' 
+                                    ? JSON.stringify(row[column], null, 2)
+                                    : row[column];
+                                  setJsonEditCell({
+                                    rowId: row.id,
+                                    field: column,
+                                    value
+                                  });
+                                } else {
+                                  // For regular data, use inline editing
+                                  setEditableCell({
+                                    rowId: row.id,
+                                    field: column,
+                                    value: row[column] || ''
+                                  });
+                                }
                               }
                             }}
                             sx={{ 
@@ -1069,7 +1230,7 @@ const DataTable: React.FC = () => {
                               alignItems: 'center',
                             }}
                           >
-                            {formatCellData(row[column])}
+                            {formatCellData(row[column], row.id, column)}
                           </Box>
                         )}
                       </StyledTableCell>
@@ -1318,6 +1479,105 @@ const DataTable: React.FC = () => {
           </IconButton>
         }
       />
+
+      {/* Add JSON Editor Dialog */}
+      <Dialog
+        open={jsonEditCell !== null}
+        onClose={() => setJsonEditCell(null)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">
+              Edit JSON {jsonEditCell && `- Field: ${jsonEditCell.field}`}
+            </Typography>
+            <Box>
+              <IconButton
+                onClick={() => {
+                  if (!jsonEditCell) return;
+                  try {
+                    // Format the JSON to make it prettier
+                    const formatted = JSON.stringify(JSON.parse(jsonEditCell.value), null, 2);
+                    setJsonEditCell({ ...jsonEditCell, value: formatted });
+                  } catch (error) {
+                    console.error('Error formatting JSON:', error);
+                  }
+                }}
+                size="small"
+                title="Format JSON"
+              >
+                <FormatAlignLeftIcon />
+              </IconButton>
+              <IconButton
+                aria-label="close"
+                onClick={() => setJsonEditCell(null)}
+                size="small"
+              >
+                <CloseIcon />
+              </IconButton>
+            </Box>
+          </Box>
+        </DialogTitle>
+        <DialogContent dividers>
+          {jsonEditCell && (
+            <TextField
+              autoFocus
+              multiline
+              fullWidth
+              variant="outlined"
+              value={jsonEditCell.value}
+              onChange={(e) => setJsonEditCell({ ...jsonEditCell, value: e.target.value })}
+              sx={{
+                fontFamily: "'Roboto Mono', monospace",
+                '& .MuiInputBase-input': {
+                  fontFamily: "'Roboto Mono', monospace",
+                  fontSize: '0.875rem',
+                },
+              }}
+              minRows={10}
+              maxRows={20}
+              error={(() => {
+                try {
+                  JSON.parse(jsonEditCell.value);
+                  return false;
+                } catch (e) {
+                  return true;
+                }
+              })()}
+              helperText={(() => {
+                try {
+                  JSON.parse(jsonEditCell.value);
+                  return 'Valid JSON';
+                } catch (e) {
+                  return e instanceof Error ? e.message : 'Invalid JSON';
+                }
+              })()}
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setJsonEditCell(null)} color="inherit">
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleSaveJsonEdit} 
+            variant="contained" 
+            color="primary"
+            disabled={(() => {
+              try {
+                if (!jsonEditCell) return true;
+                JSON.parse(jsonEditCell.value);
+                return false;
+              } catch (e) {
+                return true;
+              }
+            })()}
+          >
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

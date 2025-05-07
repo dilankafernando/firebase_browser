@@ -12,6 +12,7 @@
     "firebase": "^10.6.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-router-dom": "^6.21.0",
     "zustand": "^4.4.6"
   },
   "devDependencies": {
@@ -24,7 +25,8 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vite build",
+    "check": "tsc",
     "preview": "vite preview"
   }
 } 

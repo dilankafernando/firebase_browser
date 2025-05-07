@@ -15,14 +15,16 @@ import {
   InputAdornment,
   Collapse,
   Button,
-  Divider,
-  LinearProgress,
   Alert,
+  ListItemIcon,
+  ListItemText,
+  Paper,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import StorageIcon from '@mui/icons-material/Storage';
 import { useStore } from '../store';
 import { useCollections } from '../hooks/useFirestore';
 
@@ -33,6 +35,7 @@ const CollectionSelector: React.FC = () => {
   const [showAllCollections, setShowAllCollections] = useState(false);
   const [showChips, setShowChips] = useState(true);
   const [isTimedOut, setIsTimedOut] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   
   // Set a timeout for the loading state to detect potential issues
   useEffect(() => {
@@ -64,26 +67,12 @@ const CollectionSelector: React.FC = () => {
     ? filteredCollections 
     : filteredCollections.slice(0, 10);
   
-  // Add a dedicated function to close the dropdown
+  const openDropdown = () => {
+    setIsDropdownOpen(true);
+  };
+
   const closeDropdown = () => {
-    try {
-      // Approach 1: Directly blur the active element
-      (document.activeElement as HTMLElement)?.blur();
-      
-      // Approach 2: Find and blur the select element
-      const selectElement = document.getElementById('collection-select');
-      if (selectElement) {
-        (selectElement as HTMLElement).blur();
-      }
-      
-      // Approach 3: Click elsewhere on the page to force dropdown to close
-      setTimeout(() => {
-        // Create and trigger a click event outside the dropdown area
-        document.body.click();
-      }, 10);
-    } catch (e) {
-      console.error('Error closing dropdown:', e);
-    }
+    setIsDropdownOpen(false);
   };
 
   // Define handleChange function
@@ -198,7 +187,7 @@ const CollectionSelector: React.FC = () => {
       {/* Loading indicator with timeout warning */}
       {isLoading && (
         <Box sx={{ width: '100%', mb: 2 }}>
-          <LinearProgress 
+          <CircularProgress 
             color={isTimedOut ? "warning" : "primary"} 
             sx={{ mb: 1 }}
           />

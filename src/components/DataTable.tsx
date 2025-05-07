@@ -26,7 +26,6 @@ import {
   Collapse,
   Alert,
   InputAdornment,
-  SelectChangeEvent,
   ToggleButtonGroup,
   ToggleButton,
   Dialog,
@@ -131,8 +130,8 @@ const formatJson = (obj: any): string => {
 };
 
 const DataTable: React.FC = () => {
-  const { selectedCollection } = useStore();
-  const { data, isLoading, isError, error } = useCollectionData(selectedCollection);
+  const { selectedCollection, viewMode, setViewMode } = useStore();
+  const { data, isLoading, isError, error, refetch } = useCollectionData(selectedCollection);
   const [currentPage, setCurrentPage] = useState(1);
   const recordsPerPage = 100;
   
@@ -143,7 +142,6 @@ const DataTable: React.FC = () => {
   const [globalSearchTerm, setGlobalSearchTerm] = useState('');
   
   // View mode state
-  const [viewMode, setViewMode] = useState<ViewMode>('table');
   const [selectedRecord, setSelectedRecord] = useState<FirestoreData | null>(null);
   const [isJsonDetailOpen, setIsJsonDetailOpen] = useState(false);
 
@@ -236,7 +234,7 @@ const DataTable: React.FC = () => {
   const currentData = filteredData?.slice(startIndex, endIndex) || [];
 
   // Handle page change
-  const handlePageChange = (event: React.ChangeEvent<unknown>, value: number) => {
+  const handlePageChange = (_: any, value: number) => {
     setCurrentPage(value);
   };
 
@@ -367,42 +365,40 @@ const DataTable: React.FC = () => {
 
   // Database operation handlers
   const handleAddRow = async () => {
-    if (!selectedCollection) return;
-    
+    if (!selectedCollection) {
+      setConfirmationMessage('No collection selected');
+      setIsConfirmationOpen(true);
+      return;
+    }
+
     try {
-      // Add created timestamp
+      // Create a new document with timestamp
       const rowToAdd = {
         ...newRow,
         createdAt: serverTimestamp(),
       };
-      
-      // Remove empty id if it wasn't provided (Firestore will generate one)
-      let idToUse = newRow.id;
-      if (!newRow.id || newRow.id.trim() === '') {
-        delete rowToAdd.id;
-        idToUse = null; // We'll get the actual ID from the addDoc response
+
+      // Make sure to handle the id properly
+      if ('id' in rowToAdd) {
+        delete rowToAdd['id'];
+      }
+
+      // Use a non-null assertion since we've already checked selectedCollection
+      const db = getDb();
+      if (!db) {
+        throw new Error("Database not initialized");
       }
       
-      const docRef = await addDoc(collection(getDb(), selectedCollection), rowToAdd);
+      const docRef = await addDoc(collection(db, selectedCollection), rowToAdd);
       
-      // Create a complete record with the new ID for local state update
-      const newRecord = {
-        ...rowToAdd,
-        id: idToUse || docRef.id,
-        createdAt: new Date() // Use a JS Date object for the local state
-      };
-      
-      // Update local state immediately so the UI reflects the addition
-      setFilteredData(prevData => [...prevData, newRecord]);
-      
-      // Show confirmation
-      setConfirmationMessage('Document added successfully');
+      // Close the dialog and show confirmation
+      setIsAddMode(false);
+      setNewRow({});
+      setConfirmationMessage(`Document added with ID: ${docRef.id}`);
       setIsConfirmationOpen(true);
       
-      // Reset form
-      setIsAddMode(false);
-      setNewRow({ id: '' });
-      
+      // Refresh the data
+      refetch();
     } catch (error) {
       console.error('Error adding document:', error);
       setConfirmationMessage(`Error adding document: ${error instanceof Error ? error.message : String(error)}`);
@@ -411,40 +407,40 @@ const DataTable: React.FC = () => {
   };
 
   const handleUpdateRow = async (rowId: string, updatedData: Record<string, any>) => {
-    if (!selectedCollection) return;
-    
+    if (!selectedCollection) {
+      setConfirmationMessage('No collection selected');
+      setIsConfirmationOpen(true);
+      return;
+    }
+
     try {
-      const docRef = doc(getDb(), selectedCollection, rowId);
+      const db = getDb();
+      if (!db) {
+        throw new Error("Database not initialized");
+      }
       
-      // Add updated timestamp
+      const docRef = doc(db, selectedCollection, rowId);
+      
+      // Add update timestamp
       const dataToUpdate = {
         ...updatedData,
         updatedAt: serverTimestamp(),
       };
       
-      // Remove the id field as it shouldn't be updated
-      delete dataToUpdate.id;
+      // Make sure to handle the id properly
+      if ('id' in dataToUpdate) {
+        delete dataToUpdate['id'];
+      }
       
       await updateDoc(docRef, dataToUpdate);
       
-      // Update local state immediately so the UI reflects the change
-      setFilteredData(prevData => 
-        prevData.map(item => 
-          item.id === rowId 
-            ? { ...item, ...dataToUpdate, updatedAt: new Date() } 
-            : item
-        )
-      );
-      
       // Show confirmation
-      setConfirmationMessage('Document updated successfully');
+      setConfirmationMessage(`Document ${rowId} updated successfully`);
       setIsConfirmationOpen(true);
       
-      // Reset edit mode
-      setIsEditMode(false);
-      setEditableRow(null);
+      // Refresh and reset edit mode
+      refetch();
       setEditableCell(null);
-      
     } catch (error) {
       console.error('Error updating document:', error);
       setConfirmationMessage(`Error updating document: ${error instanceof Error ? error.message : String(error)}`);
@@ -453,35 +449,35 @@ const DataTable: React.FC = () => {
   };
 
   const handleUpdateCell = async (rowId: string, field: string, value: any) => {
-    if (!selectedCollection) return;
-    
+    if (!selectedCollection) {
+      setConfirmationMessage('No collection selected');
+      setIsConfirmationOpen(true);
+      return;
+    }
+
     try {
-      const docRef = doc(getDb(), selectedCollection, rowId);
+      const db = getDb();
+      if (!db) {
+        throw new Error("Database not initialized");
+      }
       
-      // Create update object with just the cell being updated
-      const updateData: Record<string, any> = { 
+      const docRef = doc(db, selectedCollection, rowId);
+      
+      // Construct the update object with just the field being updated
+      const updateData = {
         [field]: value,
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
       };
       
       await updateDoc(docRef, updateData);
-      
-      // Update local state immediately so the UI reflects the change
-      setFilteredData(prevData => 
-        prevData.map(item => 
-          item.id === rowId 
-            ? { ...item, [field]: value, updatedAt: new Date() } 
-            : item
-        )
-      );
       
       // Show confirmation
       setConfirmationMessage(`Field "${field}" updated successfully`);
       setIsConfirmationOpen(true);
       
-      // Reset edit mode
+      // Refresh and reset edit mode
+      refetch();
       setEditableCell(null);
-      
     } catch (error) {
       console.error('Error updating cell:', error);
       setConfirmationMessage(`Error updating cell: ${error instanceof Error ? error.message : String(error)}`);
@@ -490,23 +486,29 @@ const DataTable: React.FC = () => {
   };
 
   const handleDeleteRow = async (rowId: string) => {
-    if (!selectedCollection) return;
-    
+    if (!selectedCollection) {
+      setConfirmationMessage('No collection selected');
+      setIsConfirmationOpen(true);
+      return;
+    }
+
     try {
-      const docRef = doc(getDb(), selectedCollection, rowId);
+      const db = getDb();
+      if (!db) {
+        throw new Error("Database not initialized");
+      }
+      
+      const docRef = doc(db, selectedCollection, rowId);
       await deleteDoc(docRef);
       
-      // Update local state immediately so the UI reflects the deletion
-      setFilteredData(prevData => prevData.filter(item => item.id !== rowId));
-      
-      // Show confirmation
-      setConfirmationMessage('Document deleted successfully');
-      setIsConfirmationOpen(true);
-      
-      // Reset delete dialog
+      // Close dialog and show confirmation
       setIsDeleteDialogOpen(false);
       setRowToDelete(null);
+      setConfirmationMessage(`Document ${rowId} deleted successfully`);
+      setIsConfirmationOpen(true);
       
+      // Refresh the data
+      refetch();
     } catch (error) {
       console.error('Error deleting document:', error);
       setConfirmationMessage(`Error deleting document: ${error instanceof Error ? error.message : String(error)}`);

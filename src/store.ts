@@ -10,7 +10,7 @@ export type FirestoreData = {
 };
 
 // Define our store state
-type StoreState = {
+export interface StoreState {
   selectedCollection: string;
   setSelectedCollection: (collection: string) => void;
   collections: string[];
@@ -28,27 +28,45 @@ type StoreState = {
   logout: () => void;
   
   // Firebase configurations
+  configs: FirebaseConfig[];
   activeConfig: FirebaseConfig | null;
   addFirebaseConfig: (config: FirebaseConfig) => Promise<User | null>;
   switchFirebaseConfig: (projectId: string) => Promise<boolean>;
   removeFirebaseConfig: (projectId: string) => Promise<boolean>;
-};
+  
+  // Data Browser state
+  viewMode: 'table' | 'json' | 'form';
+  setViewMode: (mode: 'table' | 'json' | 'form') => void;
+  
+  // Test a Firebase configuration
+  testing: boolean;
+  testConfig: (config: FirebaseConfig) => Promise<boolean>;
+}
 
-// Create the store
+// Create the store with zustand
 export const useStore = create<StoreState>((set, get) => ({
-  selectedCollection: '',
-  setSelectedCollection: (collection) => set({ selectedCollection: collection }),
-  collections: [],
-  setCollections: (collections) => set({ collections }),
+  // Auth state
+  user: null,
   loading: false,
-  setLoading: (loading) => set({ loading }),
   error: null,
+  
+  // Firebase configurations
+  configs: [],
+  activeConfig: null,
+  testing: false,
+  
+  // Data Browser state
+  selectedCollection: '',
+  collections: [],
+  viewMode: 'table',
+  
+  setSelectedCollection: (collection) => set({ selectedCollection: collection }),
+  setCollections: (collections) => set({ collections }),
+  setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
   
   // Authentication state with initial values
-  user: authService.getUser(),
-  isAuthenticated: !!authService.getUser(),
-  activeConfig: authService.getActiveConfig(),
+  isAuthenticated: false,
   
   // Authentication actions
   login: async (email, password) => {
@@ -190,4 +208,23 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ loading: false });
     }
   },
+  
+  // Data Browser state
+  setViewMode: (mode) => set({ viewMode: mode }),
+  
+  // Test a Firebase configuration
+  testConfig: async (config) => {
+    set({ testing: true, error: null });
+    try {
+      firebaseService.initializeApp(config);
+      set({ testing: false, error: null });
+      return true;
+    } catch (error) {
+      set({ 
+        testing: false, 
+        error: error instanceof Error ? error.message : String(error) 
+      });
+      return false;
+    }
+  }
 })); 

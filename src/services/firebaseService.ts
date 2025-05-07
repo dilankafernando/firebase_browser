@@ -20,12 +20,26 @@ class FirebaseService {
     }
   }
 
+  // Get the current Firestore instance
+  getDb(): Firestore | null {
+    if (!this.currentConfig) return null;
+    return this.firestoreInstances.get(this.currentConfig.projectId) || null;
+  }
+
+  // Set the current active config
+  setActiveConfig(config: FirebaseConfig): void {
+    if (!this.firestoreInstances.has(config.projectId)) {
+      this.initializeApp(config);
+    }
+    this.currentConfig = config;
+  }
+
   // Initialize a new Firebase app instance with a config
   initializeApp(config: FirebaseConfig): Firestore {
     try {
       // Check if we already have an instance for this project
       if (this.firebaseApps.has(config.projectId)) {
-        const app = this.firebaseApps.get(config.projectId)!;
+        // Just return the existing instance
         const db = this.firestoreInstances.get(config.projectId)!;
         this.currentConfig = config;
         return db;
@@ -37,17 +51,14 @@ class FirebaseService {
           apiKey: config.apiKey,
           authDomain: config.authDomain,
           projectId: config.projectId,
-          storageBucket: config.storageBucket,
-          messagingSenderId: config.messagingSenderId,
-          appId: config.appId,
         },
-        config.projectId // Use projectId as the app name to avoid conflicts
+        config.projectId
       );
 
-      // Get Firestore instance
+      // Initialize Firestore
       const db = getFirestore(app);
-
-      // Store in our maps
+      
+      // Store references
       this.firebaseApps.set(config.projectId, app);
       this.firestoreInstances.set(config.projectId, db);
       this.currentConfig = config;
@@ -57,19 +68,6 @@ class FirebaseService {
       console.error('Error initializing Firebase app:', error);
       throw error;
     }
-  }
-
-  // Get Firestore instance for the active config
-  getFirestore(): Firestore | null {
-    const config = authService.getActiveConfig();
-    if (!config) return null;
-
-    // Initialize if not already done
-    if (!this.firestoreInstances.has(config.projectId)) {
-      return this.initializeApp(config);
-    }
-
-    return this.firestoreInstances.get(config.projectId) || null;
   }
 
   // Get the current active Firebase configuration
@@ -122,5 +120,5 @@ export const firebaseService = new FirebaseService();
 
 // Export a function to get the current db instance
 export const getDb = (): Firestore | null => {
-  return firebaseService.getFirestore();
+  return firebaseService.getDb();
 }; 

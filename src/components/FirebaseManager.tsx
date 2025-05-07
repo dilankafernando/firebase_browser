@@ -18,6 +18,11 @@ import {
   Tooltip,
   CircularProgress,
   Alert,
+  Grid,
+  Card,
+  CardContent,
+  CardActions,
+  DialogContentText,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -25,7 +30,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import { useStore } from '../store';
-import { FirebaseConfig } from '../services/authService';
+import { FirebaseConfig } from '../types';
 
 const FirebaseManager: React.FC = () => {
   const { user, activeConfig, addFirebaseConfig, switchFirebaseConfig, removeFirebaseConfig, loading, error } = useStore();

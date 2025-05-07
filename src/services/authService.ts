@@ -17,12 +17,14 @@ export interface User {
   displayName: string;
   firebaseConfigs: FirebaseConfig[];
   activeConfigId: string; // projectId of the active config
+  sessionExpiry?: number; // Optional expiry timestamp for the session
 }
 
 // Service for storing and retrieving user data securely
 class AuthService {
   private readonly STORAGE_KEY = 'firebase_browser_auth';
   private readonly ENCRYPTION_KEY = 'firebase_browser_secure_key';
+  private readonly SESSION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 days in milliseconds
 
   // Get user from localStorage with decryption
   getUser(): User | null {
@@ -31,21 +33,42 @@ class AuthService {
     
     try {
       const decryptedData = CryptoJS.AES.decrypt(encryptedData, this.ENCRYPTION_KEY).toString(CryptoJS.enc.Utf8);
-      return JSON.parse(decryptedData);
+      const user = JSON.parse(decryptedData) as User;
+      
+      // Check if session has expired
+      if (user.sessionExpiry && user.sessionExpiry < Date.now()) {
+        // Session expired, clear it
+        localStorage.removeItem(this.STORAGE_KEY);
+        return null;
+      }
+      
+      // Session is valid, extend it and save
+      this.extendSession(user);
+      
+      return user;
     } catch (error) {
       console.error('Failed to decrypt user data:', error);
+      localStorage.removeItem(this.STORAGE_KEY); // Clear invalid data
       return null;
     }
   }
 
   // Save user to localStorage with encryption
   saveUser(user: User): void {
+    // Set or extend session expiry
+    this.extendSession(user);
+    
     const encryptedData = CryptoJS.AES.encrypt(
       JSON.stringify(user),
       this.ENCRYPTION_KEY
     ).toString();
     
     localStorage.setItem(this.STORAGE_KEY, encryptedData);
+  }
+  
+  // Extend the session expiry time
+  private extendSession(user: User): void {
+    user.sessionExpiry = Date.now() + this.SESSION_DURATION;
   }
 
   // Login user
@@ -84,13 +107,14 @@ class AuthService {
       configs.push(firebaseConfig);
     }
     
-    // Create new user
+    // Create new user with session expiry
     const newUser: User = {
       id: userId,
       email,
       displayName,
       firebaseConfigs: configs,
       activeConfigId: firebaseConfig?.projectId || '',
+      sessionExpiry: Date.now() + this.SESSION_DURATION
     };
     
     // Add to users collection

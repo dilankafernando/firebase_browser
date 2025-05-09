@@ -1,13 +1,15 @@
 import { FirebaseApp, initializeApp, deleteApp } from 'firebase/app';
-import { Firestore, getFirestore } from 'firebase/firestore';
+import { Firestore, getFirestore, getDocs, collection } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { FirebaseConfig } from '../types';
-import { collection, getDocs, getDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { getDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 
 class FirebaseService {
   private firebaseApps: Map<string, FirebaseApp> = new Map();
   private firestoreInstances: Map<string, Firestore> = new Map();
   private currentConfig: FirebaseConfig | null = null;
+  private serverUrl = 'http://localhost:3001';
+  private isServerRunning = false;
 
   constructor() {
     // Initialize with the active config if one exists
@@ -124,6 +126,11 @@ class FirebaseService {
         return null;
       }
 
+      // Clean up the admin app for the current config if it exists
+      if (this.currentConfig) {
+        await this.cleanupAdminApp(this.currentConfig.project_id);
+      }
+
       // Get the config from the configs collection in the default database
       console.log('Fetching config document...');
       const configsRef = collection(db, 'users', user.uid, 'configs');
@@ -193,6 +200,9 @@ class FirebaseService {
       const user = auth.currentUser;
       if (!user) return;
 
+      // Clean up the admin app
+      await this.cleanupAdminApp(projectId);
+
       // Remove from Firestore
       await deleteDoc(doc(db, 'users', user.uid, 'configs', projectId));
 
@@ -238,6 +248,87 @@ class FirebaseService {
       this.currentConfig = null;
     } catch (error) {
       console.error('Error clearing configs:', error);
+    }
+  }
+
+  // Check if the admin server is running
+  private async checkServerStatus(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.serverUrl}/health`, { method: 'GET' });
+      this.isServerRunning = response.ok;
+      return this.isServerRunning;
+    } catch (error) {
+      console.error('Admin server is not running:', error);
+      this.isServerRunning = false;
+      return false;
+    }
+  }
+
+  // Get all collections from Firestore using Admin SDK backend
+  async getAllCollections(): Promise<string[]> {
+    try {
+      const db = this.getDb();
+      if (!db) {
+        console.error('No active database connection');
+        return [];
+      }
+
+      if (!this.currentConfig) {
+        console.error('No active configuration');
+        return [];
+      }
+
+      // Check if server is running
+      const serverRunning = await this.checkServerStatus();
+      if (!serverRunning) {
+        throw new Error('Admin server is not running. Please start the server with: cd server && npm run dev');
+      }
+
+      // Call the backend API to get collections
+      const response = await fetch(`${this.serverUrl}/api/collections`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          serviceAccount: {
+            type: 'service_account',
+            project_id: this.currentConfig.project_id,
+            private_key_id: this.currentConfig.private_key_id,
+            private_key: this.currentConfig.private_key,
+            client_email: this.currentConfig.client_email,
+            client_id: this.currentConfig.client_id,
+            auth_uri: this.currentConfig.auth_uri,
+            token_uri: this.currentConfig.token_uri,
+            auth_provider_x509_cert_url: this.currentConfig.auth_provider_x509_cert_url,
+            client_x509_cert_url: this.currentConfig.client_x509_cert_url
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`Failed to fetch collections from backend: ${errorData.error || response.statusText}`);
+      }
+
+      const data = await response.json();
+      return data.collections;
+    } catch (error) {
+      console.error('Error getting collections:', error);
+      throw error; // Re-throw the error so the UI can handle it
+    }
+  }
+
+  // Clean up Firebase Admin app when switching or removing configurations
+  private async cleanupAdminApp(projectId: string): Promise<void> {
+    try {
+      if (await this.checkServerStatus()) {
+        await fetch(`${this.serverUrl}/api/cleanup/${projectId}`, {
+          method: 'DELETE'
+        });
+      }
+    } catch (error) {
+      console.warn('Error cleaning up admin app:', error);
     }
   }
 }

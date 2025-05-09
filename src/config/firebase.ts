@@ -32,7 +32,7 @@ requiredEnvVars.forEach(varName => {
   }
 });
 
-// Initialize Firebase
+// Initialize Firebase client SDK
 const app = initializeApp(firebaseConfig);
 
 // Initialize Auth with persistence

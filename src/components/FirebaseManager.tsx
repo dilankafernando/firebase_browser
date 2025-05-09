@@ -23,6 +23,7 @@ import {
   CardContent,
   CardActions,
   DialogContentText,
+  ListItemSecondaryAction,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -45,12 +46,7 @@ const FirebaseManager: React.FC = () => {
   
   // Form state
   const [configDisplayName, setConfigDisplayName] = useState('');
-  const [apiKey, setApiKey] = useState('');
-  const [authDomain, setAuthDomain] = useState('');
-  const [projectId, setProjectId] = useState('');
-  const [storageBucket, setStorageBucket] = useState('');
-  const [messagingSenderId, setMessagingSenderId] = useState('');
-  const [appId, setAppId] = useState('');
+  const [serviceAccountFile, setServiceAccountFile] = useState<File | null>(null);
 
   // Load configs when component mounts
   useEffect(() => {
@@ -72,12 +68,7 @@ const FirebaseManager: React.FC = () => {
 
   const resetForm = () => {
     setConfigDisplayName('');
-    setApiKey('');
-    setAuthDomain('');
-    setProjectId('');
-    setStorageBucket('');
-    setMessagingSenderId('');
-    setAppId('');
+    setServiceAccountFile(null);
     setFormError(null);
     setIsEditMode(false);
     setEditingConfigId(null);
@@ -90,14 +81,9 @@ const FirebaseManager: React.FC = () => {
 
   const handleOpenEditDialog = (config: FirebaseConfig) => {
     setConfigDisplayName(config.displayName);
-    setApiKey(config.apiKey);
-    setAuthDomain(config.authDomain);
-    setProjectId(config.projectId);
-    setStorageBucket(config.storageBucket || '');
-    setMessagingSenderId(config.messagingSenderId || '');
-    setAppId(config.appId || '');
+    setServiceAccountFile(null);
     setIsEditMode(true);
-    setEditingConfigId(config.projectId);
+    setEditingConfigId(config.project_id);
     setOpenDialog(true);
   };
 
@@ -106,26 +92,31 @@ const FirebaseManager: React.FC = () => {
     resetForm();
   };
 
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files && event.target.files[0]) {
+      setServiceAccountFile(event.target.files[0]);
+    }
+  };
+
   const handleSubmit = async () => {
     setFormError(null);
 
     // Validate form
-    if (!configDisplayName || !apiKey || !authDomain || !projectId) {
-      setFormError('Required fields must be filled');
+    if (!configDisplayName || !serviceAccountFile) {
+      setFormError('Please provide a configuration name and service account file');
       return;
     }
 
-    const newConfig: FirebaseConfig = {
-      displayName: configDisplayName,
-      apiKey,
-      authDomain,
-      projectId,
-      storageBucket: storageBucket || '',
-      messagingSenderId: messagingSenderId || '',
-      appId: appId || '',
-    };
-
     try {
+      // Read the service account file
+      const fileContent = await serviceAccountFile.text();
+      const serviceAccount = JSON.parse(fileContent);
+
+      const newConfig: FirebaseConfig = {
+        displayName: configDisplayName,
+        ...serviceAccount
+      };
+
       const result = await addFirebaseConfig(newConfig);
       if (result) {
         handleCloseDialog();
@@ -136,7 +127,18 @@ const FirebaseManager: React.FC = () => {
   };
 
   const handleSwitchConfig = async (projectId: string) => {
-    await switchFirebaseConfig(projectId);
+    try {
+      setLocalLoading(true);
+      const result = await switchFirebaseConfig(projectId);
+      if (!result) {
+        throw new Error('Failed to switch configuration');
+      }
+    } catch (error) {
+      console.error('Error switching configuration:', error);
+      setFormError(`Failed to switch configuration: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setLocalLoading(false);
+    }
   };
 
   const handleRequestDelete = (projectId: string) => {
@@ -190,18 +192,18 @@ const FirebaseManager: React.FC = () => {
         ) : (
           <List sx={{ width: '100%' }}>
             {configs.map((config) => (
-              <React.Fragment key={config.projectId}>
+              <React.Fragment key={config.project_id}>
                 <ListItem
                   secondaryAction={
                     <Box>
-                      {config.projectId !== activeConfig?.projectId && (
+                      {config.project_id !== activeConfig?.project_id && (
                         <span>
                           <Tooltip title={isLoading ? "" : "Switch to this connection"}>
                             <span>
                               <IconButton 
                                 edge="end" 
                                 aria-label="switch"
-                                onClick={() => handleSwitchConfig(config.projectId)}
+                                onClick={() => handleSwitchConfig(config.project_id)}
                                 disabled={isLoading}
                               >
                                 <SwapHorizIcon />
@@ -230,7 +232,7 @@ const FirebaseManager: React.FC = () => {
                             <IconButton 
                               edge="end" 
                               aria-label="delete"
-                              onClick={() => handleRequestDelete(config.projectId)}
+                              onClick={() => handleRequestDelete(config.project_id)}
                               disabled={isLoading || (configs.length === 1)}
                               color="error"
                             >
@@ -242,7 +244,7 @@ const FirebaseManager: React.FC = () => {
                     </Box>
                   }
                   sx={{ 
-                    backgroundColor: config.projectId === activeConfig?.projectId 
+                    backgroundColor: config.project_id === activeConfig?.project_id 
                       ? 'rgba(0, 0, 0, 0.04)' 
                       : 'transparent',
                     borderRadius: 1,
@@ -252,7 +254,7 @@ const FirebaseManager: React.FC = () => {
                     primary={
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         {config.displayName}
-                        {config.projectId === activeConfig?.projectId && (
+                        {config.project_id === activeConfig?.project_id && (
                           <Chip 
                             size="small" 
                             color="primary" 
@@ -264,7 +266,7 @@ const FirebaseManager: React.FC = () => {
                     }
                     secondary={
                       <Typography variant="caption" component="span" sx={{ mt: 0.5, mr: 1, display: 'block' }}>
-                        Project ID: {config.projectId}
+                        Project ID: {config.project_id}
                       </Typography>
                     }
                   />
@@ -303,66 +305,28 @@ const FirebaseManager: React.FC = () => {
 
           <Divider sx={{ my: 2 }} />
           
-          <TextField
-            label="API Key"
-            fullWidth
-            margin="normal"
-            variant="outlined"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            required
-            disabled={isLoading}
-          />
-          <TextField
-            label="Auth Domain"
-            fullWidth
-            margin="normal"
-            variant="outlined"
-            value={authDomain}
-            onChange={(e) => setAuthDomain(e.target.value)}
-            required
-            disabled={isLoading}
-            placeholder="project-id.firebaseapp.com"
-          />
-          <TextField
-            label="Project ID"
-            fullWidth
-            margin="normal"
-            variant="outlined"
-            value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
-            required
-            disabled={isLoading || isEditMode} // Can't change project ID on edit
-            helperText={isEditMode ? "Project ID cannot be changed after creation" : ""}
-          />
-          <TextField
-            label="Storage Bucket"
-            fullWidth
-            margin="normal"
-            variant="outlined"
-            value={storageBucket}
-            onChange={(e) => setStorageBucket(e.target.value)}
-            disabled={isLoading}
-            placeholder="project-id.appspot.com"
-          />
-          <TextField
-            label="Messaging Sender ID"
-            fullWidth
-            margin="normal"
-            variant="outlined"
-            value={messagingSenderId}
-            onChange={(e) => setMessagingSenderId(e.target.value)}
-            disabled={isLoading}
-          />
-          <TextField
-            label="App ID"
-            fullWidth
-            margin="normal"
-            variant="outlined"
-            value={appId}
-            onChange={(e) => setAppId(e.target.value)}
-            disabled={isLoading}
-          />
+          <Box sx={{ mt: 2 }}>
+            <input
+              accept="application/json"
+              style={{ display: 'none' }}
+              id="service-account-file"
+              type="file"
+              onChange={handleFileChange}
+            />
+            <label htmlFor="service-account-file">
+              <Button
+                variant="outlined"
+                component="span"
+                fullWidth
+                disabled={isLoading}
+              >
+                {serviceAccountFile ? serviceAccountFile.name : 'Upload Service Account JSON File'}
+              </Button>
+            </label>
+            <Typography variant="caption" color="textSecondary" sx={{ mt: 1, display: 'block' }}>
+              Upload your Firebase service account JSON file
+            </Typography>
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseDialog} disabled={isLoading}>

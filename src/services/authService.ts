@@ -19,18 +19,9 @@ import {
   deleteDoc
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
+import { FirebaseConfig } from '../types';
 
 // Types
-export interface FirebaseConfig {
-  apiKey: string;
-  authDomain: string;
-  projectId: string;
-  storageBucket: string;
-  messagingSenderId: string;
-  appId: string;
-  displayName: string; // User-friendly name for this connection
-}
-
 export interface User {
   uid: string;
   email: string | null;
@@ -290,14 +281,21 @@ class AuthService {
     }
 
     try {
+      console.log('Fetching configs for user:', this.currentUser.uid);
       const configsRef = collection(db, 'users', this.currentUser.uid, 'configs');
       const querySnapshot = await getDocs(configsRef);
       
-      const configs = querySnapshot.docs.map(doc => ({
-        ...doc.data() as FirebaseConfig,
-        projectId: doc.id
-      }));
+      console.log('Found config documents:', querySnapshot.docs.map(doc => doc.id));
+      const configs = querySnapshot.docs.map(doc => {
+        const data = doc.data() as FirebaseConfig;
+        console.log('Config data for', doc.id, ':', data);
+        return {
+          ...data,
+          project_id: doc.id
+        };
+      });
 
+      console.log('Processed configs:', configs);
       return configs;
     } catch (error) {
       console.error('Error getting Firebase configs:', error);
@@ -312,7 +310,7 @@ class AuthService {
     }
 
     try {
-      const configRef = doc(db, 'users', this.currentUser.uid, 'configs', config.projectId);
+      const configRef = doc(db, 'users', this.currentUser.uid, 'configs', config.project_id);
       await setDoc(configRef, {
         ...config,
         createdAt: serverTimestamp()
@@ -337,14 +335,14 @@ class AuthService {
 
   // Get the selected Firebase config from the user's document
   async getSelectedConfig(): Promise<string | null> {
+    if (!this.currentUser) return null;
+
     try {
-      const user = auth.currentUser;
-      if (!user) return null;
-
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
-      if (!userDoc.exists()) return null;
-
-      return userDoc.data().selectedConfigId || null;
+      const userDoc = await getDoc(doc(db, 'users', this.currentUser.uid));
+      if (userDoc.exists()) {
+        return userDoc.data().selectedConfig || null;
+      }
+      return null;
     } catch (error) {
       console.error('Error getting selected config:', error);
       return null;
@@ -353,33 +351,27 @@ class AuthService {
 
   // Set the selected Firebase config in the user's document
   async setSelectedConfig(projectId: string): Promise<void> {
-    try {
-      const user = auth.currentUser;
-      if (!user) throw new Error('No authenticated user');
+    if (!this.currentUser) return;
 
-      await updateDoc(doc(db, 'users', user.uid), {
-        selectedConfigId: projectId,
-        lastUpdated: serverTimestamp()
+    try {
+      await updateDoc(doc(db, 'users', this.currentUser.uid), {
+        selectedConfig: projectId
       });
     } catch (error) {
       console.error('Error setting selected config:', error);
-      throw error;
     }
   }
 
   // Clear the selected config when removing a configuration
   async clearSelectedConfig(): Promise<void> {
-    try {
-      const user = auth.currentUser;
-      if (!user) return;
+    if (!this.currentUser) return;
 
-      await updateDoc(doc(db, 'users', user.uid), {
-        selectedConfigId: null,
-        lastUpdated: serverTimestamp()
+    try {
+      await updateDoc(doc(db, 'users', this.currentUser.uid), {
+        selectedConfig: null
       });
     } catch (error) {
       console.error('Error clearing selected config:', error);
-      throw error;
     }
   }
 }

@@ -3,6 +3,8 @@ import { User, FirebaseConfig, authService } from './services/authService';
 import { firebaseService } from './services/firebaseService';
 import { auth } from './config/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { collection, getDoc, doc } from 'firebase/firestore';
+import { db } from './config/firebase';
 
 // Define the type for our Firestore data
 // This is a generic type that you'll need to replace with your actual data structure
@@ -399,14 +401,31 @@ export const useStore = create<StoreState>((set, get) => {
     switchFirebaseConfig: async (projectId: string) => {
       set({ loading: true, error: null });
       try {
+        const user = auth.currentUser;
+        console.log('Current auth state:', { 
+          user: user ? { 
+            uid: user.uid, 
+            email: user.email,
+            isAnonymous: user.isAnonymous,
+            emailVerified: user.emailVerified
+          } : null 
+        });
+        
+        if (!user) return false;
+
+        console.log('Current configs:', get().configs);
         const configs = get().configs;
-        const config = configs.find(c => c.projectId === projectId);
+        const config = configs.find(c => c.project_id === projectId);
+        console.log('Found config:', config);
+        
         if (!config) {
+          console.error('Configuration not found in store:', projectId);
           throw new Error('Configuration not found');
         }
 
-        const db = await firebaseService.switchConfig(projectId);
-        if (!db) {
+        console.log('Switching to config:', config);
+        const newDb = await firebaseService.switchConfig(projectId);
+        if (!newDb) {
           throw new Error('Failed to switch configuration');
         }
 
@@ -414,8 +433,10 @@ export const useStore = create<StoreState>((set, get) => {
         await authService.setSelectedConfig(projectId);
 
         set({ activeConfig: config, error: null });
+        console.log('Successfully switched configuration');
         return true;
       } catch (error) {
+        console.error('Error in switchFirebaseConfig:', error);
         set({ error: (error as Error).message });
         return false;
       } finally {
@@ -431,7 +452,7 @@ export const useStore = create<StoreState>((set, get) => {
         await firebaseService.removeConfig(projectId);
         
         // If we're removing the currently selected config, clear the selection
-        if (currentConfig?.projectId === projectId) {
+        if (currentConfig?.project_id === projectId) {
           await authService.clearSelectedConfig();
         }
         

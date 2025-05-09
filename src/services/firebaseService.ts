@@ -1,8 +1,8 @@
-import { initializeApp, FirebaseApp } from 'firebase/app';
-import { getFirestore, Firestore } from 'firebase/firestore';
+import { FirebaseApp, initializeApp, deleteApp } from 'firebase/app';
+import { Firestore, getFirestore } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
-import { FirebaseConfig } from './authService';
-import { collection, getDocs, getDoc, doc, deleteDoc } from 'firebase/firestore';
+import { FirebaseConfig } from '../types';
+import { collection, getDocs, getDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 
 class FirebaseService {
   private firebaseApps: Map<string, FirebaseApp> = new Map();
@@ -24,7 +24,8 @@ class FirebaseService {
         
         if (!querySnapshot.empty) {
           const config = querySnapshot.docs[0].data() as FirebaseConfig;
-          this.initializeApp(config);
+          config.project_id = querySnapshot.docs[0].id; // Make sure project_id is set
+          await this.initializeApp(config);
         }
       }
     } catch (error) {
@@ -35,54 +36,80 @@ class FirebaseService {
   // Get the current Firestore instance
   getDb(): Firestore | null {
     if (!this.currentConfig) return null;
-    return this.firestoreInstances.get(this.currentConfig.projectId) || null;
+    const db = this.firestoreInstances.get(this.currentConfig.project_id);
+    if (!db) {
+      console.warn('Database instance not found for current config');
+      return null;
+    }
+    return db;
   }
 
   // Set the current active config
   setActiveConfig(config: FirebaseConfig): void {
-    if (!this.firestoreInstances.has(config.projectId)) {
+    if (!this.firestoreInstances.has(config.project_id)) {
       this.initializeApp(config);
     }
     this.currentConfig = config;
   }
 
   // Initialize a new Firebase app instance with a config
-  initializeApp(config: FirebaseConfig): Firestore {
+  async initializeApp(config: FirebaseConfig): Promise<Firestore> {
     try {
+      console.log('Initializing app with config:', config);
+      
       // Check if we already have an instance for this project
-      if (this.firebaseApps.has(config.projectId)) {
+      if (this.firebaseApps.has(config.project_id)) {
+        console.log('Found existing app instance for:', config.project_id);
         // Just return the existing instance
-        const db = this.firestoreInstances.get(config.projectId)!;
+        const db = this.firestoreInstances.get(config.project_id)!;
         this.currentConfig = config;
         return db;
       }
 
-      // Create a new Firebase app instance
-      const app = initializeApp(
-        {
-          apiKey: config.apiKey,
-          authDomain: config.authDomain,
-          projectId: config.projectId,
-        },
-        config.projectId
-      );
+      // Delete any existing app with the same name to avoid conflicts
+      try {
+        const existingApp = this.firebaseApps.get(config.project_id);
+        if (existingApp) {
+          console.log('Cleaning up existing app:', config.project_id);
+          await deleteApp(existingApp);
+          this.firebaseApps.delete(config.project_id);
+          this.firestoreInstances.delete(config.project_id);
+        }
+      } catch (error) {
+        console.warn('Error cleaning up existing app:', error);
+      }
 
+      // Create a new Firebase app instance
+      console.log('Creating new Firebase app instance for:', config.project_id);
+      const app = initializeApp({
+        apiKey: config.apiKey,
+        projectId: config.project_id,
+        // Only include optional fields if they exist
+        ...(config.authDomain && { authDomain: config.authDomain }),
+        ...(config.storageBucket && { storageBucket: config.storageBucket }),
+        ...(config.messagingSenderId && { messagingSenderId: config.messagingSenderId }),
+        ...(config.appId && { appId: config.appId }),
+        ...(config.measurementId && { measurementId: config.measurementId })
+      }, config.project_id);
+
+      console.log('Initializing Firestore for app:', config.project_id);
       // Initialize Firestore
-      const db = getFirestore(app);
+      const newDb = getFirestore(app);
       
       // Store references
-      this.firebaseApps.set(config.projectId, app);
-      this.firestoreInstances.set(config.projectId, db);
+      this.firebaseApps.set(config.project_id, app);
+      this.firestoreInstances.set(config.project_id, newDb);
       this.currentConfig = config;
 
-      return db;
+      console.log('Successfully initialized app and Firestore for:', config.project_id);
+      return newDb;
     } catch (error) {
       console.error('Error initializing Firebase app:', error);
       throw error;
     }
   }
 
-  // Get the current active Firebase configuration
+  // Get the current config
   getCurrentConfig(): FirebaseConfig | null {
     return this.currentConfig;
   }
@@ -90,19 +117,73 @@ class FirebaseService {
   // Switch to a different Firebase configuration
   async switchConfig(projectId: string): Promise<Firestore | null> {
     try {
+      console.log('Switching to config:', projectId);
       const user = auth.currentUser;
-      if (!user) return null;
+      if (!user) {
+        console.error('No authenticated user');
+        return null;
+      }
 
+      // Get the config from the configs collection in the default database
+      console.log('Fetching config document...');
       const configsRef = collection(db, 'users', user.uid, 'configs');
       const configDoc = await getDoc(doc(configsRef, projectId));
       
-      if (!configDoc.exists()) return null;
+      if (!configDoc.exists()) {
+        console.error('Configuration document not found:', projectId);
+        console.log('Available configs:', this.firestoreInstances.keys());
+        return null;
+      }
 
-      const config = configDoc.data() as FirebaseConfig;
-      return this.initializeApp(config);
+      console.log('Config document data:', configDoc.data());
+      // Get the config data and ensure project_id is set
+      const config = {
+        ...configDoc.data(),
+        project_id: projectId // Make sure project_id is set from the document ID
+      } as FirebaseConfig;
+
+      // Clean up existing app if it exists
+      try {
+        const existingApp = this.firebaseApps.get(projectId);
+        if (existingApp) {
+          console.log('Cleaning up existing app:', projectId);
+          await deleteApp(existingApp);
+          this.firebaseApps.delete(projectId);
+          this.firestoreInstances.delete(projectId);
+        }
+      } catch (error) {
+        console.warn('Error cleaning up existing app:', error);
+      }
+
+      console.log('Initializing new app with config:', config);
+      // Initialize the app with this config
+      const newDb = await this.initializeApp(config);
+
+      console.log('Successfully switched to config:', projectId);
+      return newDb;
     } catch (error) {
-      console.error('Error switching config:', error);
-      return null;
+      console.error('Error in switchConfig:', error);
+      throw error;
+    }
+  }
+
+  // Update the selected config in the user's document
+  private async updateSelectedConfig(projectId: string): Promise<void> {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const currentDb = this.getDb();
+      if (!currentDb) {
+        console.error('No active database connection');
+        return;
+      }
+
+      await updateDoc(doc(currentDb, 'users', user.uid), {
+        selectedConfig: projectId
+      });
+    } catch (error) {
+      console.error('Error updating selected config:', error);
     }
   }
 
@@ -115,12 +196,22 @@ class FirebaseService {
       // Remove from Firestore
       await deleteDoc(doc(db, 'users', user.uid, 'configs', projectId));
 
+      // Clean up the app instance
+      try {
+        const existingApp = this.firebaseApps.get(projectId);
+        if (existingApp) {
+          await deleteApp(existingApp);
+        }
+      } catch (error) {
+        console.warn('Error cleaning up app:', error);
+      }
+
       // Remove from local maps
       this.firebaseApps.delete(projectId);
       this.firestoreInstances.delete(projectId);
 
       // If this was the current config, update current config
-      if (this.currentConfig?.projectId === projectId) {
+      if (this.currentConfig?.project_id === projectId) {
         this.currentConfig = null;
         await this.initializeFromActiveConfig();
       }
@@ -131,10 +222,23 @@ class FirebaseService {
   }
 
   // Clear all Firebase configurations
-  clearAllConfigs(): void {
-    this.firebaseApps.clear();
-    this.firestoreInstances.clear();
-    this.currentConfig = null;
+  async clearAllConfigs(): Promise<void> {
+    try {
+      // Clean up all app instances
+      for (const [projectId, app] of this.firebaseApps) {
+        try {
+          await deleteApp(app);
+        } catch (error) {
+          console.warn(`Error cleaning up app ${projectId}:`, error);
+        }
+      }
+
+      this.firebaseApps.clear();
+      this.firestoreInstances.clear();
+      this.currentConfig = null;
+    } catch (error) {
+      console.error('Error clearing configs:', error);
+    }
   }
 }
 

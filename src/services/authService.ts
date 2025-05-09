@@ -47,21 +47,72 @@ export interface User {
 
 class AuthService {
   private currentUser: User | null = null;
+  private sessionTimeout: number = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+  private refreshTokenInterval: NodeJS.Timeout | null = null;
+  private initialized: boolean = false;
 
   constructor() {
     // Listen for auth state changes
     onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        await this.syncUserData(firebaseUser);
+        try {
+          await this.syncUserData(firebaseUser);
+          this.setupSessionManagement(firebaseUser);
+          this.initialized = true;
+        } catch (error) {
+          console.error('Error in auth state change:', error);
+          this.currentUser = null;
+          this.clearSessionManagement();
+        }
       } else {
         this.currentUser = null;
+        this.clearSessionManagement();
       }
     });
+  }
+
+  private setupSessionManagement(firebaseUser: FirebaseUser) {
+    // Clear any existing interval
+    this.clearSessionManagement();
+
+    // Set up token refresh interval (every 30 minutes)
+    this.refreshTokenInterval = setInterval(async () => {
+      try {
+        await firebaseUser.getIdToken(true); // Force refresh
+        console.log('Token refreshed successfully');
+      } catch (error) {
+        console.error('Error refreshing token:', error);
+      }
+    }, 30 * 60 * 1000); // 30 minutes
+
+    // Set up session timeout
+    const lastActivity = new Date().getTime();
+    const checkSession = () => {
+      const now = new Date().getTime();
+      if (now - lastActivity > this.sessionTimeout) {
+        this.logout();
+      }
+    };
+
+    // Check session every minute
+    setInterval(checkSession, 60 * 1000);
+  }
+
+  private clearSessionManagement() {
+    if (this.refreshTokenInterval) {
+      clearInterval(this.refreshTokenInterval);
+      this.refreshTokenInterval = null;
+    }
   }
 
   // Get the current user
   getCurrentUser(): User | null {
     return this.currentUser;
+  }
+
+  // Check if service is initialized
+  isInitialized(): boolean {
+    return this.initialized;
   }
 
   // Sign up a new user
@@ -103,7 +154,7 @@ class AuthService {
     }
   }
 
-  // Log in a user
+  // Enhanced login method with session management
   async login(email: string, password: string): Promise<User> {
     try {
       // Sign in with Firebase Auth
@@ -118,6 +169,9 @@ class AuthService {
       // Sync user data
       await this.syncUserData(firebaseUser);
       
+      // Set up session management
+      this.setupSessionManagement(firebaseUser);
+      
       return this.currentUser!;
     } catch (error) {
       console.error('Error logging in:', error);
@@ -125,9 +179,10 @@ class AuthService {
     }
   }
 
-  // Log out the current user
+  // Enhanced logout method
   async logout(): Promise<void> {
     try {
+      this.clearSessionManagement();
       await signOut(auth);
       this.currentUser = null;
     } catch (error) {
@@ -137,7 +192,11 @@ class AuthService {
   }
 
   // Sync user data from Firestore
-  private async syncUserData(firebaseUser: FirebaseUser): Promise<void> {
+  async syncUserData(firebaseUser: FirebaseUser): Promise<void> {
+    if (!firebaseUser) {
+      throw new Error('No Firebase user provided');
+    }
+
     try {
       const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
       
@@ -156,8 +215,8 @@ class AuthService {
           }
         };
       } else {
-        // Create user document if it doesn't exist
-        const userData: User = {
+        // Create a new user document if it doesn't exist
+        const newUserData: User = {
           uid: firebaseUser.uid,
           email: firebaseUser.email,
           displayName: firebaseUser.displayName,
@@ -170,17 +229,30 @@ class AuthService {
           }
         };
 
+        // Save to Firestore
         await setDoc(doc(db, 'users', firebaseUser.uid), {
-          ...userData,
+          ...newUserData,
           createdAt: serverTimestamp(),
           lastLogin: serverTimestamp()
         });
 
-        this.currentUser = userData;
+        this.currentUser = newUserData;
       }
     } catch (error) {
       console.error('Error syncing user data:', error);
-      throw error;
+      // Set a basic user object instead of throwing
+      this.currentUser = {
+        uid: firebaseUser.uid,
+        email: firebaseUser.email,
+        displayName: firebaseUser.displayName,
+        photoURL: firebaseUser.photoURL,
+        createdAt: new Date(),
+        lastLogin: new Date(),
+        preferences: {
+          theme: 'light',
+          language: 'en'
+        }
+      };
     }
   }
 
@@ -210,9 +282,34 @@ class AuthService {
     }
   }
 
+  // Get user's Firebase configurations
+  async getFirebaseConfigs(): Promise<FirebaseConfig[]> {
+    if (!this.currentUser) {
+      console.warn('No user logged in when fetching configs');
+      return [];
+    }
+
+    try {
+      const configsRef = collection(db, 'users', this.currentUser.uid, 'configs');
+      const querySnapshot = await getDocs(configsRef);
+      
+      const configs = querySnapshot.docs.map(doc => ({
+        ...doc.data() as FirebaseConfig,
+        projectId: doc.id
+      }));
+
+      return configs;
+    } catch (error) {
+      console.error('Error getting Firebase configs:', error);
+      return [];
+    }
+  }
+
   // Add Firebase configuration
   async addFirebaseConfig(config: FirebaseConfig): Promise<void> {
-    if (!this.currentUser) throw new Error('No user logged in');
+    if (!this.currentUser) {
+      throw new Error('No user logged in');
+    }
 
     try {
       const configRef = doc(db, 'users', this.currentUser.uid, 'configs', config.projectId);
@@ -222,24 +319,6 @@ class AuthService {
       });
     } catch (error) {
       console.error('Error adding Firebase config:', error);
-      throw error;
-    }
-  }
-
-  // Get user's Firebase configurations
-  async getFirebaseConfigs(): Promise<FirebaseConfig[]> {
-    if (!this.currentUser) throw new Error('No user logged in');
-
-    try {
-      const configsRef = collection(db, 'users', this.currentUser.uid, 'configs');
-      const querySnapshot = await getDocs(configsRef);
-      
-      return querySnapshot.docs.map(doc => ({
-        ...doc.data() as FirebaseConfig,
-        projectId: doc.id
-      }));
-    } catch (error) {
-      console.error('Error getting Firebase configs:', error);
       throw error;
     }
   }

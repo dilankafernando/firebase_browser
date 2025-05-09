@@ -3,6 +3,8 @@ import { Container, Box, CircularProgress } from '@mui/material';
 import Login from './Login';
 import Signup from './Signup';
 import { useStore } from '../store';
+import { onAuthStateChanged, getAuth } from 'firebase/auth';
+import { auth } from '../config/firebase';
 
 interface AuthContainerProps {
   children: React.ReactNode;
@@ -13,16 +15,23 @@ const AuthContainer: React.FC<AuthContainerProps> = ({ children }) => {
   const [showLogin, setShowLogin] = useState(true);
   const [initializing, setInitializing] = useState(true);
 
-  // Initialize session on component mount
   useEffect(() => {
-    // Try to restore the session from localStorage
-    initSession();
-    // Set initializing to false after a short delay to allow Firebase to initialize
-    const timeoutId = setTimeout(() => {
+    // Check if there's an existing session
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      initSession().finally(() => setInitializing(false));
+    }
+
+    // Set up auth state listener
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        await initSession();
+      }
       setInitializing(false);
-    }, 500);
-    
-    return () => clearTimeout(timeoutId);
+    });
+
+    // Cleanup subscription
+    return () => unsubscribe();
   }, [initSession]);
 
   const toggleForm = () => {
@@ -47,7 +56,10 @@ const AuthContainer: React.FC<AuthContainerProps> = ({ children }) => {
     );
   }
 
-  if (!isAuthenticated || !user) {
+  // Check both auth states
+  const isUserAuthenticated = isAuthenticated && user && auth.currentUser;
+
+  if (!isUserAuthenticated) {
     return (
       <Container maxWidth="lg">
         <Box sx={{ py: 4 }}>

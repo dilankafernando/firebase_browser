@@ -31,15 +31,17 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import { useStore } from '../store';
 import { FirebaseConfig } from '../types';
+import { authService } from '../services/authService';
 
 const FirebaseManager: React.FC = () => {
-  const { user, activeConfig, configs, addFirebaseConfig, switchFirebaseConfig, removeFirebaseConfig, loading, error, initSession } = useStore();
+  const { user, activeConfig, configs, addFirebaseConfig, switchFirebaseConfig, removeFirebaseConfig, loading, error } = useStore();
   const [openDialog, setOpenDialog] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingConfigId, setEditingConfigId] = useState<string | null>(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [configToDelete, setConfigToDelete] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [localLoading, setLocalLoading] = useState(true);
   
   // Form state
   const [configDisplayName, setConfigDisplayName] = useState('');
@@ -50,12 +52,23 @@ const FirebaseManager: React.FC = () => {
   const [messagingSenderId, setMessagingSenderId] = useState('');
   const [appId, setAppId] = useState('');
 
-  // Initialize session when component mounts
+  // Load configs when component mounts
   useEffect(() => {
-    if (user) {
-      initSession();
-    }
-  }, [user, initSession]);
+    const loadConfigs = async () => {
+      try {
+        setLocalLoading(true);
+        if (user) {
+          await authService.getFirebaseConfigs();
+        }
+      } catch (error) {
+        console.error('Error loading configs:', error);
+      } finally {
+        setLocalLoading(false);
+      }
+    };
+
+    loadConfigs();
+  }, [user]);
 
   const resetForm = () => {
     setConfigDisplayName('');
@@ -143,6 +156,8 @@ const FirebaseManager: React.FC = () => {
     return null;
   }
 
+  const isLoading = loading || localLoading;
+
   return (
     <Box sx={{ my: 4 }}>
       <Paper elevation={3} sx={{ p: 3 }}>
@@ -152,7 +167,7 @@ const FirebaseManager: React.FC = () => {
             variant="contained" 
             startIcon={<AddIcon />}
             onClick={handleOpenAddDialog}
-            disabled={loading}
+            disabled={isLoading}
           >
             Add Connection
           </Button>
@@ -164,13 +179,11 @@ const FirebaseManager: React.FC = () => {
           </Alert>
         )}
 
-        {loading && (
+        {isLoading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
             <CircularProgress />
           </Box>
-        )}
-
-        {!loading && configs.length === 0 ? (
+        ) : configs.length === 0 ? (
           <Alert severity="info" sx={{ my: 2 }}>
             You don't have any Firebase connections yet. Add a connection to get started.
           </Alert>
@@ -187,7 +200,7 @@ const FirebaseManager: React.FC = () => {
                             edge="end" 
                             aria-label="switch"
                             onClick={() => handleSwitchConfig(config.projectId)}
-                            disabled={loading}
+                            disabled={isLoading}
                           >
                             <SwapHorizIcon />
                           </IconButton>
@@ -198,7 +211,7 @@ const FirebaseManager: React.FC = () => {
                           edge="end" 
                           aria-label="edit"
                           onClick={() => handleOpenEditDialog(config)}
-                          disabled={loading}
+                          disabled={isLoading}
                         >
                           <EditIcon />
                         </IconButton>
@@ -208,7 +221,7 @@ const FirebaseManager: React.FC = () => {
                           edge="end" 
                           aria-label="delete"
                           onClick={() => handleRequestDelete(config.projectId)}
-                          disabled={loading || (configs.length === 1)}
+                          disabled={isLoading || (configs.length === 1)}
                           color="error"
                         >
                           <DeleteIcon />
@@ -273,7 +286,7 @@ const FirebaseManager: React.FC = () => {
             value={configDisplayName}
             onChange={(e) => setConfigDisplayName(e.target.value)}
             required
-            disabled={loading}
+            disabled={isLoading}
             placeholder="My Firebase Project"
             helperText="A friendly name to identify this connection"
           />
@@ -288,7 +301,7 @@ const FirebaseManager: React.FC = () => {
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             required
-            disabled={loading}
+            disabled={isLoading}
           />
           <TextField
             label="Auth Domain"
@@ -298,7 +311,7 @@ const FirebaseManager: React.FC = () => {
             value={authDomain}
             onChange={(e) => setAuthDomain(e.target.value)}
             required
-            disabled={loading}
+            disabled={isLoading}
             placeholder="project-id.firebaseapp.com"
           />
           <TextField
@@ -309,7 +322,7 @@ const FirebaseManager: React.FC = () => {
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
             required
-            disabled={loading || isEditMode} // Can't change project ID on edit
+            disabled={isLoading || isEditMode} // Can't change project ID on edit
             helperText={isEditMode ? "Project ID cannot be changed after creation" : ""}
           />
           <TextField
@@ -319,7 +332,7 @@ const FirebaseManager: React.FC = () => {
             variant="outlined"
             value={storageBucket}
             onChange={(e) => setStorageBucket(e.target.value)}
-            disabled={loading}
+            disabled={isLoading}
             placeholder="project-id.appspot.com"
           />
           <TextField
@@ -329,7 +342,7 @@ const FirebaseManager: React.FC = () => {
             variant="outlined"
             value={messagingSenderId}
             onChange={(e) => setMessagingSenderId(e.target.value)}
-            disabled={loading}
+            disabled={isLoading}
           />
           <TextField
             label="App ID"
@@ -338,20 +351,20 @@ const FirebaseManager: React.FC = () => {
             variant="outlined"
             value={appId}
             onChange={(e) => setAppId(e.target.value)}
-            disabled={loading}
+            disabled={isLoading}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseDialog} disabled={loading}>
+          <Button onClick={handleCloseDialog} disabled={isLoading}>
             Cancel
           </Button>
           <Button 
             onClick={handleSubmit} 
             variant="contained" 
             color="primary"
-            disabled={loading}
+            disabled={isLoading}
           >
-            {loading ? <CircularProgress size={24} /> : (isEditMode ? 'Update' : 'Add')}
+            {isLoading ? <CircularProgress size={24} /> : (isEditMode ? 'Update' : 'Add')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -365,16 +378,16 @@ const FirebaseManager: React.FC = () => {
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setConfirmDeleteOpen(false)} disabled={loading}>
+          <Button onClick={() => setConfirmDeleteOpen(false)} disabled={isLoading}>
             Cancel
           </Button>
           <Button 
             onClick={handleConfirmDelete} 
             color="error" 
             variant="contained"
-            disabled={loading}
+            disabled={isLoading}
           >
-            {loading ? <CircularProgress size={24} /> : 'Delete'}
+            {isLoading ? <CircularProgress size={24} /> : 'Delete'}
           </Button>
         </DialogActions>
       </Dialog>

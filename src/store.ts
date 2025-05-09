@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { User, FirebaseConfig, authService } from './services/authService';
 import { firebaseService } from './services/firebaseService';
 import { auth } from './config/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 
 // Define the type for our Firestore data
 // This is a generic type that you'll need to replace with your actual data structure
@@ -27,7 +28,7 @@ export interface StoreState {
   login: (email: string, password: string) => Promise<User | null>;
   signup: (email: string, password: string, displayName: string, firebaseConfig?: FirebaseConfig) => Promise<User | null>;
   logout: () => void;
-  initSession: () => void;
+  initSession: () => Promise<void>;
   
   // Firebase configurations
   configs: FirebaseConfig[];
@@ -46,25 +47,94 @@ export interface StoreState {
 }
 
 // Create the store with zustand
-export const useStore = create<StoreState>((set) => {
-  // Initialize session immediately when store is created
-  const currentUser = authService.getCurrentUser();
-  const isAuthenticated = !!currentUser;
-  let activeConfig = firebaseService.getCurrentConfig();
-  
+export const useStore = create<StoreState>((set, get) => {
+  // Set up auth state listener
+  const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    if (firebaseUser) {
+      try {
+        set({ loading: true, error: null });
+        
+        // Wait for auth service to initialize
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // First get the user data
+        const user = await authService.getCurrentUser();
+        if (!user) {
+          // If no user data, try to sync it first
+          await authService.syncUserData(firebaseUser);
+          const updatedUser = await authService.getCurrentUser();
+          if (!updatedUser) {
+            throw new Error('Failed to get user data');
+          }
+          // Then try to get configs
+          let configs: FirebaseConfig[] = [];
+          let activeConfig = null;
+          try {
+            configs = await authService.getFirebaseConfigs();
+            activeConfig = firebaseService.getCurrentConfig();
+          } catch (error) {
+            console.warn('No Firebase configs found:', error);
+          }
+          
+          set({
+            user: updatedUser,
+            isAuthenticated: true,
+            activeConfig,
+            configs,
+            loading: false,
+            error: null
+          });
+        } else {
+          // Then try to get configs
+          let configs: FirebaseConfig[] = [];
+          let activeConfig = null;
+          try {
+            configs = await authService.getFirebaseConfigs();
+            activeConfig = firebaseService.getCurrentConfig();
+          } catch (error) {
+            console.warn('No Firebase configs found:', error);
+          }
+          
+          set({
+            user,
+            isAuthenticated: true,
+            activeConfig,
+            configs,
+            loading: false,
+            error: null
+          });
+        }
+      } catch (error) {
+        console.error('Error in auth state change:', error);
+        set({
+          user: null,
+          isAuthenticated: false,
+          activeConfig: null,
+          configs: [],
+          loading: false,
+          error: (error as Error).message
+        });
+      }
+    } else {
+      set({
+        user: null,
+        isAuthenticated: false,
+        activeConfig: null,
+        configs: [],
+        loading: false,
+        error: null
+      });
+    }
+  });
+
   return {
-    // Auth state initialized from Firebase Auth
-    user: currentUser,
-    isAuthenticated,
+    // Initial state
+    user: null,
+    isAuthenticated: false,
+    activeConfig: null,
+    configs: [],
     loading: false,
     error: null,
-    
-    // Firebase configurations
-    configs: [],
-    activeConfig,
-    testing: false,
-    
-    // Data Browser state
     selectedCollection: '',
     collections: [],
     viewMode: 'table',
@@ -77,21 +147,48 @@ export const useStore = create<StoreState>((set) => {
     // Initialize session from Firebase Auth
     initSession: async () => {
       try {
-        const user = authService.getCurrentUser();
-        if (user) {
-          const configs = await authService.getFirebaseConfigs();
-          const activeConfig = firebaseService.getCurrentConfig();
-          
-          set({
-            user,
-            isAuthenticated: true,
-            activeConfig,
-            configs
-          });
+        set({ loading: true, error: null });
+        const currentUser = auth.currentUser;
+        if (!currentUser) {
+          throw new Error('No authenticated user');
         }
+
+        // Wait for auth service to initialize
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        await authService.syncUserData(currentUser);
+        const user = await authService.getCurrentUser();
+        if (!user) {
+          throw new Error('Failed to get user data');
+        }
+
+        let configs: FirebaseConfig[] = [];
+        let activeConfig = null;
+        try {
+          configs = await authService.getFirebaseConfigs();
+          activeConfig = firebaseService.getCurrentConfig();
+        } catch (error) {
+          console.warn('No Firebase configs found:', error);
+        }
+        
+        set({
+          user,
+          isAuthenticated: true,
+          activeConfig,
+          configs,
+          loading: false,
+          error: null
+        });
       } catch (error) {
         console.error('Error initializing session:', error);
-        set({ error: (error as Error).message });
+        set({ 
+          error: (error as Error).message,
+          user: null,
+          isAuthenticated: false,
+          activeConfig: null,
+          configs: [],
+          loading: false
+        });
       }
     },
     
@@ -100,17 +197,26 @@ export const useStore = create<StoreState>((set) => {
       set({ loading: true, error: null });
       try {
         const user = await authService.login(email, password);
-        const configs = await authService.getFirebaseConfigs();
-        const activeConfig = firebaseService.getCurrentConfig();
+        let configs: FirebaseConfig[] = [];
+        let activeConfig = null;
+        try {
+          configs = await authService.getFirebaseConfigs();
+          activeConfig = firebaseService.getCurrentConfig();
+        } catch (error) {
+          console.warn('No Firebase configs found:', error);
+        }
         
-        set({ 
+        const newState = { 
           user, 
           isAuthenticated: true, 
           activeConfig,
           configs,
           selectedCollection: '',
           collections: []
-        });
+        };
+        
+        set(newState);
+        localStorage.setItem('firebase-browser-state', JSON.stringify(newState));
         return user;
       } catch (error) {
         set({ error: (error as Error).message });
@@ -130,8 +236,14 @@ export const useStore = create<StoreState>((set) => {
           firebaseService.initializeApp(firebaseConfig);
         }
         
-        const configs = await authService.getFirebaseConfigs();
-        const activeConfig = firebaseService.getCurrentConfig();
+        let configs: FirebaseConfig[] = [];
+        let activeConfig = null;
+        try {
+          configs = await authService.getFirebaseConfigs();
+          activeConfig = firebaseService.getCurrentConfig();
+        } catch (error) {
+          console.warn('No Firebase configs found:', error);
+        }
         
         set({ 
           user, 
@@ -162,6 +274,7 @@ export const useStore = create<StoreState>((set) => {
           selectedCollection: '',
           collections: []
         });
+        localStorage.removeItem('firebase-browser-state');
       } catch (error) {
         set({ error: (error as Error).message });
       }

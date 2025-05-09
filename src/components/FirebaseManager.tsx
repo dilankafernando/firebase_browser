@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -33,7 +33,7 @@ import { useStore } from '../store';
 import { FirebaseConfig } from '../types';
 
 const FirebaseManager: React.FC = () => {
-  const { user, activeConfig, addFirebaseConfig, switchFirebaseConfig, removeFirebaseConfig, loading, error } = useStore();
+  const { user, activeConfig, configs, addFirebaseConfig, switchFirebaseConfig, removeFirebaseConfig, loading, error, initSession } = useStore();
   const [openDialog, setOpenDialog] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingConfigId, setEditingConfigId] = useState<string | null>(null);
@@ -49,6 +49,13 @@ const FirebaseManager: React.FC = () => {
   const [storageBucket, setStorageBucket] = useState('');
   const [messagingSenderId, setMessagingSenderId] = useState('');
   const [appId, setAppId] = useState('');
+
+  // Initialize session when component mounts
+  useEffect(() => {
+    if (user) {
+      initSession();
+    }
+  }, [user, initSession]);
 
   const resetForm = () => {
     setConfigDisplayName('');
@@ -163,13 +170,13 @@ const FirebaseManager: React.FC = () => {
           </Box>
         )}
 
-        {!loading && user.firebaseConfigs.length === 0 ? (
+        {!loading && configs.length === 0 ? (
           <Alert severity="info" sx={{ my: 2 }}>
             You don't have any Firebase connections yet. Add a connection to get started.
           </Alert>
         ) : (
           <List sx={{ width: '100%' }}>
-            {user.firebaseConfigs.map((config) => (
+            {configs.map((config) => (
               <React.Fragment key={config.projectId}>
                 <ListItem
                   secondaryAction={
@@ -201,7 +208,7 @@ const FirebaseManager: React.FC = () => {
                           edge="end" 
                           aria-label="delete"
                           onClick={() => handleRequestDelete(config.projectId)}
-                          disabled={loading || (user.firebaseConfigs.length === 1)}
+                          disabled={loading || (configs.length === 1)}
                           color="error"
                         >
                           <DeleteIcon />

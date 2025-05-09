@@ -78,9 +78,10 @@ const CollectionSelector: React.FC = () => {
   // Define handleChange function
   const handleChange = (event: SelectChangeEvent<string>) => {
     const value = event.target.value;
-    // Explicitly set the selected collection in the store
     setSelectedCollection(value);
     closeDropdown();
+    // Force blur to ensure dropdown closes
+    (document.activeElement as HTMLElement)?.blur();
   };
 
   const handleRefresh = () => {
@@ -238,12 +239,9 @@ const CollectionSelector: React.FC = () => {
           id="collection-select"
           value={selectedCollection}
           onChange={handleChange}
-          onClose={() => {
-            // Additional callback to ensure closing
-            setTimeout(() => {
-              (document.activeElement as HTMLElement)?.blur();
-            }, 10);
-          }}
+          onClose={closeDropdown}
+          open={isDropdownOpen}
+          onOpen={openDropdown}
           label="Select Collection"
           disabled={isLoading || collections.length === 0}
           startAdornment={
@@ -258,7 +256,6 @@ const CollectionSelector: React.FC = () => {
             autoFocus: false,
             disableAutoFocusItem: true,
             disablePortal: true,
-            // Ensure menu closes properly after selection
             anchorOrigin: {
               vertical: 'bottom',
               horizontal: 'left',

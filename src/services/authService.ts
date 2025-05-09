@@ -70,7 +70,6 @@ class AuthService {
     this.refreshTokenInterval = setInterval(async () => {
       try {
         await firebaseUser.getIdToken(true); // Force refresh
-        console.log('Token refreshed successfully');
       } catch (error) {
         console.error('Error refreshing token:', error);
       }
@@ -276,27 +275,17 @@ class AuthService {
   // Get user's Firebase configurations
   async getFirebaseConfigs(): Promise<FirebaseConfig[]> {
     if (!this.currentUser) {
-      console.warn('No user logged in when fetching configs');
       return [];
     }
 
     try {
-      console.log('Fetching configs for user:', this.currentUser.uid);
       const configsRef = collection(db, 'users', this.currentUser.uid, 'configs');
       const querySnapshot = await getDocs(configsRef);
       
-      console.log('Found config documents:', querySnapshot.docs.map(doc => doc.id));
-      const configs = querySnapshot.docs.map(doc => {
-        const data = doc.data() as FirebaseConfig;
-        console.log('Config data for', doc.id, ':', data);
-        return {
-          ...data,
-          project_id: doc.id
-        };
-      });
-
-      console.log('Processed configs:', configs);
-      return configs;
+      return querySnapshot.docs.map(doc => ({
+        ...doc.data() as FirebaseConfig,
+        project_id: doc.id
+      }));
     } catch (error) {
       console.error('Error getting Firebase configs:', error);
       return [];

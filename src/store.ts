@@ -79,13 +79,13 @@ export const useStore = create<StoreState>((set, get) => {
             if (configs.length === 1 && !activeConfig) {
               activeConfig = configs[0];
               await firebaseService.initializeApp(activeConfig);
-              await authService.setSelectedConfig(activeConfig.projectId);
+              await authService.setSelectedConfig(activeConfig.project_id);
             } 
             // If there are multiple configs, try to get the last selected from database
             else if (configs.length > 1 && !activeConfig) {
               const selectedConfigId = await authService.getSelectedConfig();
               if (selectedConfigId) {
-                const savedConfig = configs.find(c => c.projectId === selectedConfigId);
+                const savedConfig = configs.find(c => c.project_id === selectedConfigId);
                 if (savedConfig) {
                   activeConfig = savedConfig;
                   await firebaseService.initializeApp(activeConfig);
@@ -116,13 +116,13 @@ export const useStore = create<StoreState>((set, get) => {
             if (configs.length === 1 && !activeConfig) {
               activeConfig = configs[0];
               await firebaseService.initializeApp(activeConfig);
-              await authService.setSelectedConfig(activeConfig.projectId);
+              await authService.setSelectedConfig(activeConfig.project_id);
             } 
             // If there are multiple configs, try to get the last selected from database
             else if (configs.length > 1 && !activeConfig) {
               const selectedConfigId = await authService.getSelectedConfig();
               if (selectedConfigId) {
-                const savedConfig = configs.find(c => c.projectId === selectedConfigId);
+                const savedConfig = configs.find(c => c.project_id === selectedConfigId);
                 if (savedConfig) {
                   activeConfig = savedConfig;
                   await firebaseService.initializeApp(activeConfig);
@@ -191,9 +191,6 @@ export const useStore = create<StoreState>((set, get) => {
           throw new Error('No authenticated user');
         }
 
-        // Wait for auth service to initialize
-        await new Promise(resolve => setTimeout(resolve, 100));
-
         await authService.syncUserData(currentUser);
         const user = await authService.getCurrentUser();
         if (!user) {
@@ -204,27 +201,24 @@ export const useStore = create<StoreState>((set, get) => {
         let activeConfig = null;
         try {
           configs = await authService.getFirebaseConfigs();
-          activeConfig = firebaseService.getCurrentConfig();
           
-          // If there's only one config, automatically select it
-          if (configs.length === 1 && !activeConfig) {
-            activeConfig = configs[0];
-            await firebaseService.initializeApp(activeConfig);
-            await authService.setSelectedConfig(activeConfig.projectId);
-          } 
-          // If there are multiple configs, try to get the last selected from database
-          else if (configs.length > 1 && !activeConfig) {
-            const selectedConfigId = await authService.getSelectedConfig();
-            if (selectedConfigId) {
-              const savedConfig = configs.find(c => c.projectId === selectedConfigId);
-              if (savedConfig) {
-                activeConfig = savedConfig;
-                await firebaseService.initializeApp(activeConfig);
-              }
+          // Try to get the last selected config from database
+          const selectedConfigId = await authService.getSelectedConfig();
+          if (selectedConfigId) {
+            const savedConfig = configs.find(c => c.project_id === selectedConfigId);
+            if (savedConfig) {
+              activeConfig = savedConfig;
+              await firebaseService.initializeApp(activeConfig);
             }
           }
+          // If no selected config but there's only one config, use it
+          else if (configs.length === 1) {
+            activeConfig = configs[0];
+            await firebaseService.initializeApp(activeConfig);
+            await authService.setSelectedConfig(activeConfig.project_id);
+          }
         } catch (error) {
-          console.warn('No Firebase configs found:', error);
+          console.error('Error loading Firebase configs:', error);
         }
         
         set({
@@ -263,13 +257,13 @@ export const useStore = create<StoreState>((set, get) => {
           if (configs.length === 1 && !activeConfig) {
             activeConfig = configs[0];
             await firebaseService.initializeApp(activeConfig);
-            await authService.setSelectedConfig(activeConfig.projectId);
+            await authService.setSelectedConfig(activeConfig.project_id);
           } 
           // If there are multiple configs, try to get the last selected from database
           else if (configs.length > 1 && !activeConfig) {
             const selectedConfigId = await authService.getSelectedConfig();
             if (selectedConfigId) {
-              const savedConfig = configs.find(c => c.projectId === selectedConfigId);
+              const savedConfig = configs.find(c => c.project_id === selectedConfigId);
               if (savedConfig) {
                 activeConfig = savedConfig;
                 await firebaseService.initializeApp(activeConfig);
@@ -320,13 +314,13 @@ export const useStore = create<StoreState>((set, get) => {
           if (configs.length === 1 && !activeConfig) {
             activeConfig = configs[0];
             await firebaseService.initializeApp(activeConfig);
-            await authService.setSelectedConfig(activeConfig.projectId);
+            await authService.setSelectedConfig(activeConfig.project_id);
           } 
           // If there are multiple configs, try to get the last selected from database
           else if (configs.length > 1 && !activeConfig) {
             const selectedConfigId = await authService.getSelectedConfig();
             if (selectedConfigId) {
-              const savedConfig = configs.find(c => c.projectId === selectedConfigId);
+              const savedConfig = configs.find(c => c.project_id === selectedConfigId);
               if (savedConfig) {
                 activeConfig = savedConfig;
                 await firebaseService.initializeApp(activeConfig);
@@ -377,7 +371,8 @@ export const useStore = create<StoreState>((set, get) => {
       set({ loading: true, error: null });
       try {
         await authService.addFirebaseConfig(config);
-        firebaseService.initializeApp(config);
+        await firebaseService.initializeApp(config);
+        await authService.setSelectedConfig(config.project_id);
         
         const configs = await authService.getFirebaseConfigs();
         const activeConfig = firebaseService.getCurrentConfig();
@@ -402,28 +397,15 @@ export const useStore = create<StoreState>((set, get) => {
       set({ loading: true, error: null });
       try {
         const user = auth.currentUser;
-        console.log('Current auth state:', { 
-          user: user ? { 
-            uid: user.uid, 
-            email: user.email,
-            isAnonymous: user.isAnonymous,
-            emailVerified: user.emailVerified
-          } : null 
-        });
-        
         if (!user) return false;
 
-        console.log('Current configs:', get().configs);
         const configs = get().configs;
         const config = configs.find(c => c.project_id === projectId);
-        console.log('Found config:', config);
         
         if (!config) {
-          console.error('Configuration not found in store:', projectId);
           throw new Error('Configuration not found');
         }
 
-        console.log('Switching to config:', config);
         const newDb = await firebaseService.switchConfig(projectId);
         if (!newDb) {
           throw new Error('Failed to switch configuration');
@@ -432,8 +414,12 @@ export const useStore = create<StoreState>((set, get) => {
         // Save the selected config in the database
         await authService.setSelectedConfig(projectId);
 
-        set({ activeConfig: config, error: null });
-        console.log('Successfully switched configuration');
+        set({ 
+          activeConfig: config, 
+          error: null,
+          selectedCollection: '',
+          collections: []
+        });
         return true;
       } catch (error) {
         console.error('Error in switchFirebaseConfig:', error);

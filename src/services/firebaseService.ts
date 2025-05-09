@@ -119,10 +119,8 @@ class FirebaseService {
   // Switch to a different Firebase configuration
   async switchConfig(projectId: string): Promise<Firestore | null> {
     try {
-      console.log('Switching to config:', projectId);
       const user = auth.currentUser;
       if (!user) {
-        console.error('No authenticated user');
         return null;
       }
 
@@ -132,20 +130,16 @@ class FirebaseService {
       }
 
       // Get the config from the configs collection in the default database
-      console.log('Fetching config document...');
       const configsRef = collection(db, 'users', user.uid, 'configs');
       const configDoc = await getDoc(doc(configsRef, projectId));
       
       if (!configDoc.exists()) {
-        console.error('Configuration document not found:', projectId);
-        console.log('Available configs:', this.firestoreInstances.keys());
         return null;
       }
 
-      console.log('Config document data:', configDoc.data());
       // Get the config data and ensure project_id is set
       const config = {
-        ...configDoc.data(),
+        ...(configDoc.data() as Omit<FirebaseConfig, 'project_id'>),
         project_id: projectId // Make sure project_id is set from the document ID
       } as FirebaseConfig;
 
@@ -153,20 +147,16 @@ class FirebaseService {
       try {
         const existingApp = this.firebaseApps.get(projectId);
         if (existingApp) {
-          console.log('Cleaning up existing app:', projectId);
           await deleteApp(existingApp);
           this.firebaseApps.delete(projectId);
           this.firestoreInstances.delete(projectId);
         }
       } catch (error) {
-        console.warn('Error cleaning up existing app:', error);
+        console.error('Error cleaning up existing app:', error);
       }
 
-      console.log('Initializing new app with config:', config);
       // Initialize the app with this config
       const newDb = await this.initializeApp(config);
-
-      console.log('Successfully switched to config:', projectId);
       return newDb;
     } catch (error) {
       console.error('Error in switchConfig:', error);

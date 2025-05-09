@@ -114,7 +114,8 @@ const FirebaseManager: React.FC = () => {
 
       const newConfig: FirebaseConfig = {
         displayName: configDisplayName,
-        ...serviceAccount
+        ...serviceAccount,
+        project_id: serviceAccount.project_id // Ensure project_id is set correctly
       };
 
       const result = await addFirebaseConfig(newConfig);
@@ -148,9 +149,17 @@ const FirebaseManager: React.FC = () => {
 
   const handleConfirmDelete = async () => {
     if (configToDelete) {
-      await removeFirebaseConfig(configToDelete);
-      setConfirmDeleteOpen(false);
-      setConfigToDelete(null);
+      try {
+        setLocalLoading(true);
+        await removeFirebaseConfig(configToDelete);
+        setConfirmDeleteOpen(false);
+        setConfigToDelete(null);
+      } catch (error) {
+        console.error('Error deleting configuration:', error);
+        setFormError(`Failed to delete configuration: ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        setLocalLoading(false);
+      }
     }
   };
 

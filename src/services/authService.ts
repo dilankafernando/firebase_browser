@@ -1,4 +1,24 @@
-import CryptoJS from 'crypto-js';
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  User as FirebaseUser,
+  onAuthStateChanged,
+  updateProfile
+} from 'firebase/auth';
+import {
+  doc,
+  setDoc,
+  getDoc,
+  updateDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+  serverTimestamp,
+  deleteDoc
+} from 'firebase/firestore';
+import { auth, db } from '../config/firebase';
 
 // Types
 export interface FirebaseConfig {
@@ -12,313 +32,230 @@ export interface FirebaseConfig {
 }
 
 export interface User {
-  id: string;
-  email: string;
-  displayName: string;
-  firebaseConfigs: FirebaseConfig[];
-  activeConfigId: string; // projectId of the active config
-  sessionExpiry?: number; // Optional expiry timestamp for the session
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+  createdAt: Date;
+  lastLogin: Date;
+  preferences?: {
+    theme?: 'light' | 'dark';
+    language?: string;
+    [key: string]: any;
+  };
 }
 
-// Service for storing and retrieving user data securely
 class AuthService {
-  private readonly STORAGE_KEY = 'firebase_browser_auth';
-  private readonly ENCRYPTION_KEY = 'firebase_browser_secure_key';
-  private readonly SESSION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 days in milliseconds
+  private currentUser: User | null = null;
 
-  // Get user from localStorage with decryption
-  getUser(): User | null {
-    const encryptedData = localStorage.getItem(this.STORAGE_KEY);
-    if (!encryptedData) return null;
-    
-    try {
-      const decryptedData = CryptoJS.AES.decrypt(encryptedData, this.ENCRYPTION_KEY).toString(CryptoJS.enc.Utf8);
-      const user = JSON.parse(decryptedData) as User;
-      
-      // Check if session has expired
-      if (user.sessionExpiry && user.sessionExpiry < Date.now()) {
-        // Session expired, clear it
-        localStorage.removeItem(this.STORAGE_KEY);
-        return null;
-      }
-      
-      // Session is valid, extend it and save
-      this.extendSession(user);
-      
-      return user;
-    } catch (error) {
-      console.error('Failed to decrypt user data:', error);
-      localStorage.removeItem(this.STORAGE_KEY); // Clear invalid data
-      return null;
-    }
-  }
-
-  // Save user to localStorage with encryption
-  saveUser(user: User): void {
-    // Set or extend session expiry
-    this.extendSession(user);
-    
-    const encryptedData = CryptoJS.AES.encrypt(
-      JSON.stringify(user),
-      this.ENCRYPTION_KEY
-    ).toString();
-    
-    localStorage.setItem(this.STORAGE_KEY, encryptedData);
-  }
-  
-  // Extend the session expiry time
-  private extendSession(user: User): void {
-    user.sessionExpiry = Date.now() + this.SESSION_DURATION;
-  }
-
-  // Login user
-  login(email: string, password: string): User | null {
-    // Get all users
-    const users = this.getAllUsers();
-    
-    // Find user with matching email and password
-    const user = users.find(u => 
-      u.email === email && 
-      this.verifyPassword(password, u.id)
-    );
-    
-    if (user) {
-      // Update local storage with the current user
-      this.saveUser(user);
-      return user;
-    }
-    
-    return null;
-  }
-
-  // Sign up new user
-  signup(email: string, password: string, displayName: string, firebaseConfig?: FirebaseConfig): User {
-    // Generate unique id
-    const userId = CryptoJS.SHA256(email + Date.now().toString()).toString();
-    
-    // Store password securely
-    this.storePassword(password, userId);
-    
-    // Initialize configs array
-    const configs: FirebaseConfig[] = [];
-    
-    // Add initial config if provided
-    if (firebaseConfig) {
-      configs.push(firebaseConfig);
-    }
-    
-    // Create new user with session expiry
-    const newUser: User = {
-      id: userId,
-      email,
-      displayName,
-      firebaseConfigs: configs,
-      activeConfigId: firebaseConfig?.projectId || '',
-      sessionExpiry: Date.now() + this.SESSION_DURATION
-    };
-    
-    // Add to users collection
-    this.addUser(newUser);
-    
-    // Set as current user
-    this.saveUser(newUser);
-    
-    return newUser;
-  }
-
-  // Logout user
-  logout(): void {
-    localStorage.removeItem(this.STORAGE_KEY);
-  }
-
-  // Add Firebase config to user
-  addFirebaseConfig(config: FirebaseConfig): User | null {
-    const user = this.getUser();
-    if (!user) return null;
-    
-    // Check if config with same projectId already exists
-    const existingConfigIndex = user.firebaseConfigs.findIndex(c => c.projectId === config.projectId);
-    
-    if (existingConfigIndex >= 0) {
-      // Update existing config
-      user.firebaseConfigs[existingConfigIndex] = config;
-    } else {
-      // Add new config
-      user.firebaseConfigs.push(config);
-    }
-    
-    // Set as active config if user has no active config
-    if (!user.activeConfigId) {
-      user.activeConfigId = config.projectId;
-    }
-    
-    // Update user in storage
-    this.saveUser(user);
-    this.updateUserInCollection(user);
-    
-    return user;
-  }
-
-  // Set active Firebase config
-  setActiveConfig(projectId: string): User | null {
-    const user = this.getUser();
-    if (!user) return null;
-    
-    // Make sure the config exists
-    const configExists = user.firebaseConfigs.some(c => c.projectId === projectId);
-    if (!configExists) return null;
-    
-    // Update active config
-    user.activeConfigId = projectId;
-    
-    // Update user in storage
-    this.saveUser(user);
-    this.updateUserInCollection(user);
-    
-    return user;
-  }
-
-  // Get active Firebase config
-  getActiveConfig(): FirebaseConfig | null {
-    const user = this.getUser();
-    if (!user || !user.activeConfigId) return null;
-    
-    return user.firebaseConfigs.find(c => c.projectId === user.activeConfigId) || null;
-  }
-
-  // Remove a Firebase config
-  removeFirebaseConfig(projectId: string): User | null {
-    const user = this.getUser();
-    if (!user) return null;
-    
-    // Remove config
-    user.firebaseConfigs = user.firebaseConfigs.filter(c => c.projectId !== projectId);
-    
-    // If active config was removed, set a new one
-    if (user.activeConfigId === projectId) {
-      user.activeConfigId = user.firebaseConfigs.length > 0 ? user.firebaseConfigs[0].projectId : '';
-    }
-    
-    // Update user in storage
-    this.saveUser(user);
-    this.updateUserInCollection(user);
-    
-    return user;
-  }
-
-  // Private methods for managing users collection
-  private readonly USERS_KEY = 'firebase_browser_users';
-
-  private getAllUsers(): User[] {
-    try {
-      const encryptedData = localStorage.getItem(this.USERS_KEY);
-      if (!encryptedData) return [];
-      
-      const decryptedData = CryptoJS.AES.decrypt(encryptedData, this.ENCRYPTION_KEY).toString(CryptoJS.enc.Utf8);
-      return JSON.parse(decryptedData);
-    } catch (error) {
-      console.error('Failed to get users:', error);
-      return [];
-    }
-  }
-
-  private addUser(user: User): void {
-    const users = this.getAllUsers();
-    
-    // Check if user already exists
-    const existingIndex = users.findIndex(u => u.email === user.email);
-    if (existingIndex >= 0) {
-      throw new Error('User with this email already exists');
-    }
-    
-    // Add new user
-    users.push(user);
-    
-    // Save users collection
-    this.saveUsers(users);
-  }
-
-  private updateUserInCollection(user: User): void {
-    const users = this.getAllUsers();
-    
-    // Find user index
-    const userIndex = users.findIndex(u => u.id === user.id);
-    
-    if (userIndex >= 0) {
-      // Update user
-      users[userIndex] = user;
-      
-      // Save users collection
-      this.saveUsers(users);
-    }
-  }
-
-  private saveUsers(users: User[]): void {
-    const encryptedData = CryptoJS.AES.encrypt(
-      JSON.stringify(users),
-      this.ENCRYPTION_KEY
-    ).toString();
-    
-    localStorage.setItem(this.USERS_KEY, encryptedData);
-  }
-
-  // Password handling
-  private readonly PASSWORDS_KEY = 'firebase_browser_passwords';
-
-  private storePassword(password: string, userId: string): void {
-    // Get existing passwords
-    let passwords: Record<string, string>;
-    try {
-      const encryptedData = localStorage.getItem(this.PASSWORDS_KEY);
-      if (encryptedData) {
-        const decryptedData = CryptoJS.AES.decrypt(encryptedData, this.ENCRYPTION_KEY).toString(CryptoJS.enc.Utf8);
-        passwords = JSON.parse(decryptedData);
+  constructor() {
+    // Listen for auth state changes
+    onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        await this.syncUserData(firebaseUser);
       } else {
-        passwords = {};
+        this.currentUser = null;
       }
-    } catch (error) {
-      console.error('Failed to get passwords:', error);
-      passwords = {};
-    }
-    
-    // Hash the password with the user id as salt
-    const hashedPassword = CryptoJS.SHA256(password + userId).toString();
-    
-    // Store the hashed password
-    passwords[userId] = hashedPassword;
-    
-    // Save passwords
-    const encryptedData = CryptoJS.AES.encrypt(
-      JSON.stringify(passwords),
-      this.ENCRYPTION_KEY
-    ).toString();
-    
-    localStorage.setItem(this.PASSWORDS_KEY, encryptedData);
+    });
   }
 
-  private verifyPassword(password: string, userId: string): boolean {
+  // Get the current user
+  getCurrentUser(): User | null {
+    return this.currentUser;
+  }
+
+  // Sign up a new user
+  async signup(email: string, password: string, displayName: string): Promise<User> {
     try {
-      // Get stored passwords
-      const encryptedData = localStorage.getItem(this.PASSWORDS_KEY);
-      if (!encryptedData) return false;
-      
-      const decryptedData = CryptoJS.AES.decrypt(encryptedData, this.ENCRYPTION_KEY).toString(CryptoJS.enc.Utf8);
-      const passwords = JSON.parse(decryptedData);
-      
-      // Get stored hash for user
-      const storedHash = passwords[userId];
-      if (!storedHash) return false;
-      
-      // Hash the provided password
-      const hashedPassword = CryptoJS.SHA256(password + userId).toString();
-      
-      // Compare hashes
-      return storedHash === hashedPassword;
+      // Create user in Firebase Auth
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const firebaseUser = userCredential.user;
+
+      // Update profile with display name
+      await updateProfile(firebaseUser, { displayName });
+
+      // Create user document in Firestore
+      const userData: User = {
+        uid: firebaseUser.uid,
+        email: firebaseUser.email,
+        displayName: firebaseUser.displayName,
+        photoURL: firebaseUser.photoURL,
+        createdAt: new Date(),
+        lastLogin: new Date(),
+        preferences: {
+          theme: 'light',
+          language: 'en'
+        }
+      };
+
+      await setDoc(doc(db, 'users', firebaseUser.uid), {
+        ...userData,
+        createdAt: serverTimestamp(),
+        lastLogin: serverTimestamp()
+      });
+
+      // Update current user
+      this.currentUser = userData;
+      return userData;
     } catch (error) {
-      console.error('Failed to verify password:', error);
-      return false;
+      console.error('Error signing up:', error);
+      throw error;
+    }
+  }
+
+  // Log in a user
+  async login(email: string, password: string): Promise<User> {
+    try {
+      // Sign in with Firebase Auth
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const firebaseUser = userCredential.user;
+
+      // Update last login time
+      await updateDoc(doc(db, 'users', firebaseUser.uid), {
+        lastLogin: serverTimestamp()
+      });
+
+      // Sync user data
+      await this.syncUserData(firebaseUser);
+      
+      return this.currentUser!;
+    } catch (error) {
+      console.error('Error logging in:', error);
+      throw error;
+    }
+  }
+
+  // Log out the current user
+  async logout(): Promise<void> {
+    try {
+      await signOut(auth);
+      this.currentUser = null;
+    } catch (error) {
+      console.error('Error logging out:', error);
+      throw error;
+    }
+  }
+
+  // Sync user data from Firestore
+  private async syncUserData(firebaseUser: FirebaseUser): Promise<void> {
+    try {
+      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+      
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        this.currentUser = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          displayName: firebaseUser.displayName,
+          photoURL: firebaseUser.photoURL,
+          createdAt: userData.createdAt?.toDate() || new Date(),
+          lastLogin: userData.lastLogin?.toDate() || new Date(),
+          preferences: userData.preferences || {
+            theme: 'light',
+            language: 'en'
+          }
+        };
+      } else {
+        // Create user document if it doesn't exist
+        const userData: User = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          displayName: firebaseUser.displayName,
+          photoURL: firebaseUser.photoURL,
+          createdAt: new Date(),
+          lastLogin: new Date(),
+          preferences: {
+            theme: 'light',
+            language: 'en'
+          }
+        };
+
+        await setDoc(doc(db, 'users', firebaseUser.uid), {
+          ...userData,
+          createdAt: serverTimestamp(),
+          lastLogin: serverTimestamp()
+        });
+
+        this.currentUser = userData;
+      }
+    } catch (error) {
+      console.error('Error syncing user data:', error);
+      throw error;
+    }
+  }
+
+  // Update user preferences
+  async updatePreferences(preferences: Partial<User['preferences']>): Promise<void> {
+    if (!this.currentUser) throw new Error('No user logged in');
+
+    try {
+      await updateDoc(doc(db, 'users', this.currentUser.uid), {
+        preferences: {
+          ...this.currentUser.preferences,
+          ...preferences
+        }
+      });
+
+      // Update local user data
+      this.currentUser = {
+        ...this.currentUser,
+        preferences: {
+          ...this.currentUser.preferences,
+          ...preferences
+        }
+      };
+    } catch (error) {
+      console.error('Error updating preferences:', error);
+      throw error;
+    }
+  }
+
+  // Add Firebase configuration
+  async addFirebaseConfig(config: FirebaseConfig): Promise<void> {
+    if (!this.currentUser) throw new Error('No user logged in');
+
+    try {
+      const configRef = doc(db, 'users', this.currentUser.uid, 'configs', config.projectId);
+      await setDoc(configRef, {
+        ...config,
+        createdAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error('Error adding Firebase config:', error);
+      throw error;
+    }
+  }
+
+  // Get user's Firebase configurations
+  async getFirebaseConfigs(): Promise<FirebaseConfig[]> {
+    if (!this.currentUser) throw new Error('No user logged in');
+
+    try {
+      const configsRef = collection(db, 'users', this.currentUser.uid, 'configs');
+      const querySnapshot = await getDocs(configsRef);
+      
+      return querySnapshot.docs.map(doc => ({
+        ...doc.data() as FirebaseConfig,
+        projectId: doc.id
+      }));
+    } catch (error) {
+      console.error('Error getting Firebase configs:', error);
+      throw error;
+    }
+  }
+
+  // Remove a Firebase configuration
+  async removeFirebaseConfig(projectId: string): Promise<void> {
+    if (!this.currentUser) throw new Error('No user logged in');
+
+    try {
+      await deleteDoc(doc(db, 'users', this.currentUser.uid, 'configs', projectId));
+    } catch (error) {
+      console.error('Error removing Firebase config:', error);
+      throw error;
     }
   }
 }
 
+// Create and export a singleton instance
 export const authService = new AuthService(); 

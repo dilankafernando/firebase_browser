@@ -1,6 +1,8 @@
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getFirestore, Firestore } from 'firebase/firestore';
-import { authService, FirebaseConfig } from './authService';
+import { auth, db } from '../config/firebase';
+import { FirebaseConfig } from './authService';
+import { collection, getDocs, getDoc, doc, deleteDoc } from 'firebase/firestore';
 
 class FirebaseService {
   private firebaseApps: Map<string, FirebaseApp> = new Map();
@@ -13,10 +15,20 @@ class FirebaseService {
   }
 
   // Initialize using the active config from auth service
-  initializeFromActiveConfig(): void {
-    const config = authService.getActiveConfig();
-    if (config) {
-      this.initializeApp(config);
+  private async initializeFromActiveConfig(): Promise<void> {
+    try {
+      const user = auth.currentUser;
+      if (user) {
+        const configsRef = collection(db, 'users', user.uid, 'configs');
+        const querySnapshot = await getDocs(configsRef);
+        
+        if (!querySnapshot.empty) {
+          const config = querySnapshot.docs[0].data() as FirebaseConfig;
+          this.initializeApp(config);
+        }
+      }
+    } catch (error) {
+      console.error('Error initializing from active config:', error);
     }
   }
 
@@ -76,34 +88,45 @@ class FirebaseService {
   }
 
   // Switch to a different Firebase configuration
-  switchConfig(projectId: string): Firestore | null {
-    // Update active config in auth service
-    const user = authService.setActiveConfig(projectId);
-    if (!user) return null;
+  async switchConfig(projectId: string): Promise<Firestore | null> {
+    try {
+      const user = auth.currentUser;
+      if (!user) return null;
 
-    // Get the config
-    const config = user.firebaseConfigs.find(c => c.projectId === projectId);
-    if (!config) return null;
+      const configsRef = collection(db, 'users', user.uid, 'configs');
+      const configDoc = await getDoc(doc(configsRef, projectId));
+      
+      if (!configDoc.exists()) return null;
 
-    // Initialize if not already done
-    if (!this.firestoreInstances.has(projectId)) {
+      const config = configDoc.data() as FirebaseConfig;
       return this.initializeApp(config);
+    } catch (error) {
+      console.error('Error switching config:', error);
+      return null;
     }
-
-    // Update current config
-    this.currentConfig = config;
-    return this.firestoreInstances.get(projectId) || null;
   }
 
   // Remove a Firebase configuration
-  removeConfig(projectId: string): void {
-    this.firebaseApps.delete(projectId);
-    this.firestoreInstances.delete(projectId);
+  async removeConfig(projectId: string): Promise<void> {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
 
-    // If this was the current config, update current config
-    if (this.currentConfig?.projectId === projectId) {
-      this.currentConfig = null;
-      this.initializeFromActiveConfig();
+      // Remove from Firestore
+      await deleteDoc(doc(db, 'users', user.uid, 'configs', projectId));
+
+      // Remove from local maps
+      this.firebaseApps.delete(projectId);
+      this.firestoreInstances.delete(projectId);
+
+      // If this was the current config, update current config
+      if (this.currentConfig?.projectId === projectId) {
+        this.currentConfig = null;
+        await this.initializeFromActiveConfig();
+      }
+    } catch (error) {
+      console.error('Error removing config:', error);
+      throw error;
     }
   }
 

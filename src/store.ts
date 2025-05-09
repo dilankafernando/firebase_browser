@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { User, FirebaseConfig, authService } from './services/authService';
 import { firebaseService } from './services/firebaseService';
+import { auth } from './config/firebase';
 
 // Define the type for our Firestore data
 // This is a generic type that you'll need to replace with your actual data structure
@@ -47,31 +48,19 @@ export interface StoreState {
 // Create the store with zustand
 export const useStore = create<StoreState>((set) => {
   // Initialize session immediately when store is created
-  const storedUser = authService.getUser();
-  const isAuthenticated = !!storedUser;
-  let activeConfig = null;
-  
-  // If user is authenticated, initialize Firebase with active config
-  if (isAuthenticated && storedUser) {
-    activeConfig = authService.getActiveConfig();
-    if (activeConfig) {
-      try {
-        firebaseService.initializeApp(activeConfig);
-      } catch (error) {
-        console.error('Error initializing Firebase:', error);
-      }
-    }
-  }
+  const currentUser = authService.getCurrentUser();
+  const isAuthenticated = !!currentUser;
+  let activeConfig = firebaseService.getCurrentConfig();
   
   return {
-    // Auth state initialized from local storage
-    user: storedUser,
+    // Auth state initialized from Firebase Auth
+    user: currentUser,
     isAuthenticated,
     loading: false,
     error: null,
     
     // Firebase configurations
-    configs: storedUser?.firebaseConfigs || [],
+    configs: [],
     activeConfig,
     testing: false,
     
@@ -85,25 +74,24 @@ export const useStore = create<StoreState>((set) => {
     setLoading: (loading) => set({ loading }),
     setError: (error) => set({ error }),
     
-    // Initialize session from localStorage
-    initSession: () => {
-      const user = authService.getUser();
-      if (user) {
-        const activeConfig = authService.getActiveConfig();
-        if (activeConfig) {
-          try {
-            firebaseService.initializeApp(activeConfig);
-          } catch (error) {
-            console.error('Error initializing Firebase:', error);
-          }
+    // Initialize session from Firebase Auth
+    initSession: async () => {
+      try {
+        const user = authService.getCurrentUser();
+        if (user) {
+          const configs = await authService.getFirebaseConfigs();
+          const activeConfig = firebaseService.getCurrentConfig();
+          
+          set({
+            user,
+            isAuthenticated: true,
+            activeConfig,
+            configs
+          });
         }
-        
-        set({
-          user,
-          isAuthenticated: true,
-          activeConfig,
-          configs: user.firebaseConfigs || []
-        });
+      } catch (error) {
+        console.error('Error initializing session:', error);
+        set({ error: (error as Error).message });
       }
     },
     
@@ -111,47 +99,15 @@ export const useStore = create<StoreState>((set) => {
     login: async (email, password) => {
       set({ loading: true, error: null });
       try {
-        const user = authService.login(email, password);
-        if (user) {
-          // Initialize Firebase with the active config
-          firebaseService.initializeFromActiveConfig();
-          
-          set({ 
-            user, 
-            isAuthenticated: true, 
-            activeConfig: authService.getActiveConfig(),
-            configs: user.firebaseConfigs || [],
-            selectedCollection: '',
-            collections: []
-          });
-          return user;
-        } else {
-          set({ error: 'Invalid email or password' });
-          return null;
-        }
-      } catch (error) {
-        set({ error: (error as Error).message });
-        return null;
-      } finally {
-        set({ loading: false });
-      }
-    },
-    
-    signup: async (email, password, displayName, firebaseConfig) => {
-      set({ loading: true, error: null });
-      try {
-        const user = authService.signup(email, password, displayName, firebaseConfig);
-        
-        // Initialize Firebase with the new config if provided
-        if (firebaseConfig) {
-          firebaseService.initializeApp(firebaseConfig);
-        }
+        const user = await authService.login(email, password);
+        const configs = await authService.getFirebaseConfigs();
+        const activeConfig = firebaseService.getCurrentConfig();
         
         set({ 
           user, 
           isAuthenticated: true, 
-          activeConfig: authService.getActiveConfig(),
-          configs: user.firebaseConfigs || [],
+          activeConfig,
+          configs,
           selectedCollection: '',
           collections: []
         });
@@ -164,38 +120,70 @@ export const useStore = create<StoreState>((set) => {
       }
     },
     
-    logout: () => {
-      authService.logout();
-      firebaseService.clearAllConfigs();
-      set({ 
-        user: null, 
-        isAuthenticated: false, 
-        activeConfig: null,
-        configs: [],
-        selectedCollection: '',
-        collections: []
-      });
+    signup: async (email, password, displayName, firebaseConfig) => {
+      set({ loading: true, error: null });
+      try {
+        const user = await authService.signup(email, password, displayName);
+        
+        if (firebaseConfig) {
+          await authService.addFirebaseConfig(firebaseConfig);
+          firebaseService.initializeApp(firebaseConfig);
+        }
+        
+        const configs = await authService.getFirebaseConfigs();
+        const activeConfig = firebaseService.getCurrentConfig();
+        
+        set({ 
+          user, 
+          isAuthenticated: true, 
+          activeConfig,
+          configs,
+          selectedCollection: '',
+          collections: []
+        });
+        return user;
+      } catch (error) {
+        set({ error: (error as Error).message });
+        return null;
+      } finally {
+        set({ loading: false });
+      }
+    },
+    
+    logout: async () => {
+      try {
+        await authService.logout();
+        firebaseService.clearAllConfigs();
+        set({ 
+          user: null, 
+          isAuthenticated: false, 
+          activeConfig: null,
+          configs: [],
+          selectedCollection: '',
+          collections: []
+        });
+      } catch (error) {
+        set({ error: (error as Error).message });
+      }
     },
     
     // Firebase configuration actions
     addFirebaseConfig: async (config) => {
       set({ loading: true, error: null });
       try {
-        const user = authService.addFirebaseConfig(config);
-        if (user) {
-          // Initialize Firebase with the new config
-          firebaseService.initializeApp(config);
-          
-          set({ 
-            user,
-            configs: user.firebaseConfigs,
-            activeConfig: authService.getActiveConfig(),
-            selectedCollection: '',
-            collections: []
-          });
-          return user;
-        }
-        return null;
+        await authService.addFirebaseConfig(config);
+        firebaseService.initializeApp(config);
+        
+        const configs = await authService.getFirebaseConfigs();
+        const activeConfig = firebaseService.getCurrentConfig();
+        
+        set({ 
+          configs,
+          activeConfig,
+          selectedCollection: '',
+          collections: []
+        });
+        return authService.getCurrentUser();
       } catch (error) {
         set({ error: (error as Error).message });
         return null;
@@ -207,10 +195,10 @@ export const useStore = create<StoreState>((set) => {
     switchFirebaseConfig: async (projectId) => {
       set({ loading: true, error: null });
       try {
-        const db = firebaseService.switchConfig(projectId);
+        const db = await firebaseService.switchConfig(projectId);
         if (db) {
           set({ 
-            activeConfig: authService.getActiveConfig(),
+            activeConfig: firebaseService.getCurrentConfig(),
             selectedCollection: '',
             collections: []
           });
@@ -229,22 +217,16 @@ export const useStore = create<StoreState>((set) => {
     removeFirebaseConfig: async (projectId) => {
       set({ loading: true, error: null });
       try {
-        const user = authService.removeFirebaseConfig(projectId);
-        if (user) {
-          // Remove the config from the service
-          firebaseService.removeConfig(projectId);
-          
-          set({ 
-            user,
-            configs: user.firebaseConfigs,
-            activeConfig: authService.getActiveConfig(),
-            selectedCollection: '',
-            collections: []
-          });
-          return true;
-        }
-        set({ error: 'Failed to remove Firebase configuration' });
-        return false;
+        await firebaseService.removeConfig(projectId);
+        const configs = await authService.getFirebaseConfigs();
+        
+        set({ 
+          configs,
+          activeConfig: firebaseService.getCurrentConfig(),
+          selectedCollection: '',
+          collections: []
+        });
+        return true;
       } catch (error) {
         set({ error: (error as Error).message });
         return false;

@@ -34,6 +34,7 @@ export const getCollections = async (): Promise<string[]> => {
         console.log('No metadata document found, trying alternative methods');
       }
       
+      
       // Method 2: Check specific collection names directly
       // Focus first on the user-provided ones since they're the most important
       const primaryCollections = [

@@ -334,6 +334,54 @@ class AuthService {
       throw error;
     }
   }
+
+  // Get the selected Firebase config from the user's document
+  async getSelectedConfig(): Promise<string | null> {
+    try {
+      const user = auth.currentUser;
+      if (!user) return null;
+
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      if (!userDoc.exists()) return null;
+
+      return userDoc.data().selectedConfigId || null;
+    } catch (error) {
+      console.error('Error getting selected config:', error);
+      return null;
+    }
+  }
+
+  // Set the selected Firebase config in the user's document
+  async setSelectedConfig(projectId: string): Promise<void> {
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error('No authenticated user');
+
+      await updateDoc(doc(db, 'users', user.uid), {
+        selectedConfigId: projectId,
+        lastUpdated: serverTimestamp()
+      });
+    } catch (error) {
+      console.error('Error setting selected config:', error);
+      throw error;
+    }
+  }
+
+  // Clear the selected config when removing a configuration
+  async clearSelectedConfig(): Promise<void> {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      await updateDoc(doc(db, 'users', user.uid), {
+        selectedConfigId: null,
+        lastUpdated: serverTimestamp()
+      });
+    } catch (error) {
+      console.error('Error clearing selected config:', error);
+      throw error;
+    }
+  }
 }
 
 // Create and export a singleton instance

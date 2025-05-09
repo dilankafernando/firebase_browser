@@ -72,6 +72,24 @@ export const useStore = create<StoreState>((set, get) => {
           try {
             configs = await authService.getFirebaseConfigs();
             activeConfig = firebaseService.getCurrentConfig();
+            
+            // If there's only one config, automatically select it
+            if (configs.length === 1 && !activeConfig) {
+              activeConfig = configs[0];
+              await firebaseService.initializeApp(activeConfig);
+              await authService.setSelectedConfig(activeConfig.projectId);
+            } 
+            // If there are multiple configs, try to get the last selected from database
+            else if (configs.length > 1 && !activeConfig) {
+              const selectedConfigId = await authService.getSelectedConfig();
+              if (selectedConfigId) {
+                const savedConfig = configs.find(c => c.projectId === selectedConfigId);
+                if (savedConfig) {
+                  activeConfig = savedConfig;
+                  await firebaseService.initializeApp(activeConfig);
+                }
+              }
+            }
           } catch (error) {
             console.warn('No Firebase configs found:', error);
           }
@@ -91,6 +109,24 @@ export const useStore = create<StoreState>((set, get) => {
           try {
             configs = await authService.getFirebaseConfigs();
             activeConfig = firebaseService.getCurrentConfig();
+            
+            // If there's only one config, automatically select it
+            if (configs.length === 1 && !activeConfig) {
+              activeConfig = configs[0];
+              await firebaseService.initializeApp(activeConfig);
+              await authService.setSelectedConfig(activeConfig.projectId);
+            } 
+            // If there are multiple configs, try to get the last selected from database
+            else if (configs.length > 1 && !activeConfig) {
+              const selectedConfigId = await authService.getSelectedConfig();
+              if (selectedConfigId) {
+                const savedConfig = configs.find(c => c.projectId === selectedConfigId);
+                if (savedConfig) {
+                  activeConfig = savedConfig;
+                  await firebaseService.initializeApp(activeConfig);
+                }
+              }
+            }
           } catch (error) {
             console.warn('No Firebase configs found:', error);
           }
@@ -167,6 +203,24 @@ export const useStore = create<StoreState>((set, get) => {
         try {
           configs = await authService.getFirebaseConfigs();
           activeConfig = firebaseService.getCurrentConfig();
+          
+          // If there's only one config, automatically select it
+          if (configs.length === 1 && !activeConfig) {
+            activeConfig = configs[0];
+            await firebaseService.initializeApp(activeConfig);
+            await authService.setSelectedConfig(activeConfig.projectId);
+          } 
+          // If there are multiple configs, try to get the last selected from database
+          else if (configs.length > 1 && !activeConfig) {
+            const selectedConfigId = await authService.getSelectedConfig();
+            if (selectedConfigId) {
+              const savedConfig = configs.find(c => c.projectId === selectedConfigId);
+              if (savedConfig) {
+                activeConfig = savedConfig;
+                await firebaseService.initializeApp(activeConfig);
+              }
+            }
+          }
         } catch (error) {
           console.warn('No Firebase configs found:', error);
         }
@@ -202,6 +256,24 @@ export const useStore = create<StoreState>((set, get) => {
         try {
           configs = await authService.getFirebaseConfigs();
           activeConfig = firebaseService.getCurrentConfig();
+          
+          // If there's only one config, automatically select it
+          if (configs.length === 1 && !activeConfig) {
+            activeConfig = configs[0];
+            await firebaseService.initializeApp(activeConfig);
+            await authService.setSelectedConfig(activeConfig.projectId);
+          } 
+          // If there are multiple configs, try to get the last selected from database
+          else if (configs.length > 1 && !activeConfig) {
+            const selectedConfigId = await authService.getSelectedConfig();
+            if (selectedConfigId) {
+              const savedConfig = configs.find(c => c.projectId === selectedConfigId);
+              if (savedConfig) {
+                activeConfig = savedConfig;
+                await firebaseService.initializeApp(activeConfig);
+              }
+            }
+          }
         } catch (error) {
           console.warn('No Firebase configs found:', error);
         }
@@ -241,6 +313,24 @@ export const useStore = create<StoreState>((set, get) => {
         try {
           configs = await authService.getFirebaseConfigs();
           activeConfig = firebaseService.getCurrentConfig();
+          
+          // If there's only one config, automatically select it
+          if (configs.length === 1 && !activeConfig) {
+            activeConfig = configs[0];
+            await firebaseService.initializeApp(activeConfig);
+            await authService.setSelectedConfig(activeConfig.projectId);
+          } 
+          // If there are multiple configs, try to get the last selected from database
+          else if (configs.length > 1 && !activeConfig) {
+            const selectedConfigId = await authService.getSelectedConfig();
+            if (selectedConfigId) {
+              const savedConfig = configs.find(c => c.projectId === selectedConfigId);
+              if (savedConfig) {
+                activeConfig = savedConfig;
+                await firebaseService.initializeApp(activeConfig);
+              }
+            }
+          }
         } catch (error) {
           console.warn('No Firebase configs found:', error);
         }
@@ -305,20 +395,26 @@ export const useStore = create<StoreState>((set, get) => {
       }
     },
     
-    switchFirebaseConfig: async (projectId) => {
+    // Modify switchFirebaseConfig to save the selection in database
+    switchFirebaseConfig: async (projectId: string) => {
       set({ loading: true, error: null });
       try {
-        const db = await firebaseService.switchConfig(projectId);
-        if (db) {
-          set({ 
-            activeConfig: firebaseService.getCurrentConfig(),
-            selectedCollection: '',
-            collections: []
-          });
-          return true;
+        const configs = get().configs;
+        const config = configs.find(c => c.projectId === projectId);
+        if (!config) {
+          throw new Error('Configuration not found');
         }
-        set({ error: 'Failed to switch Firebase configuration' });
-        return false;
+
+        const db = await firebaseService.switchConfig(projectId);
+        if (!db) {
+          throw new Error('Failed to switch configuration');
+        }
+
+        // Save the selected config in the database
+        await authService.setSelectedConfig(projectId);
+
+        set({ activeConfig: config, error: null });
+        return true;
       } catch (error) {
         set({ error: (error as Error).message });
         return false;
@@ -327,10 +423,18 @@ export const useStore = create<StoreState>((set, get) => {
       }
     },
     
-    removeFirebaseConfig: async (projectId) => {
+    // Update removeFirebaseConfig to clear selection if needed
+    removeFirebaseConfig: async (projectId: string) => {
       set({ loading: true, error: null });
       try {
+        const currentConfig = get().activeConfig;
         await firebaseService.removeConfig(projectId);
+        
+        // If we're removing the currently selected config, clear the selection
+        if (currentConfig?.projectId === projectId) {
+          await authService.clearSelectedConfig();
+        }
+        
         const configs = await authService.getFirebaseConfigs();
         
         set({ 

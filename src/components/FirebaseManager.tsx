@@ -195,38 +195,50 @@ const FirebaseManager: React.FC = () => {
                   secondaryAction={
                     <Box>
                       {config.projectId !== activeConfig?.projectId && (
-                        <Tooltip title="Switch to this connection">
-                          <IconButton 
-                            edge="end" 
-                            aria-label="switch"
-                            onClick={() => handleSwitchConfig(config.projectId)}
-                            disabled={isLoading}
-                          >
-                            <SwapHorizIcon />
-                          </IconButton>
-                        </Tooltip>
+                        <span>
+                          <Tooltip title={isLoading ? "" : "Switch to this connection"}>
+                            <span>
+                              <IconButton 
+                                edge="end" 
+                                aria-label="switch"
+                                onClick={() => handleSwitchConfig(config.projectId)}
+                                disabled={isLoading}
+                              >
+                                <SwapHorizIcon />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </span>
                       )}
-                      <Tooltip title="Edit connection">
-                        <IconButton 
-                          edge="end" 
-                          aria-label="edit"
-                          onClick={() => handleOpenEditDialog(config)}
-                          disabled={isLoading}
-                        >
-                          <EditIcon />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete connection">
-                        <IconButton 
-                          edge="end" 
-                          aria-label="delete"
-                          onClick={() => handleRequestDelete(config.projectId)}
-                          disabled={isLoading || (configs.length === 1)}
-                          color="error"
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </Tooltip>
+                      <span>
+                        <Tooltip title={isLoading ? "" : "Edit connection"}>
+                          <span>
+                            <IconButton 
+                              edge="end" 
+                              aria-label="edit"
+                              onClick={() => handleOpenEditDialog(config)}
+                              disabled={isLoading}
+                            >
+                              <EditIcon />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      </span>
+                      <span>
+                        <Tooltip title={isLoading || configs.length === 1 ? "" : "Delete connection"}>
+                          <span>
+                            <IconButton 
+                              edge="end" 
+                              aria-label="delete"
+                              onClick={() => handleRequestDelete(config.projectId)}
+                              disabled={isLoading || (configs.length === 1)}
+                              color="error"
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      </span>
                     </Box>
                   }
                   sx={{ 
@@ -251,11 +263,9 @@ const FirebaseManager: React.FC = () => {
                       </Box>
                     }
                     secondary={
-                      <Box sx={{ mt: 0.5 }}>
-                        <Typography variant="caption" component="span" sx={{ mr: 1 }}>
-                          Project ID: {config.projectId}
-                        </Typography>
-                      </Box>
+                      <Typography variant="caption" component="span" sx={{ mt: 0.5, mr: 1, display: 'block' }}>
+                        Project ID: {config.projectId}
+                      </Typography>
                     }
                   />
                 </ListItem>

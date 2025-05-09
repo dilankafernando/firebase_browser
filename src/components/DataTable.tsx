@@ -150,9 +150,18 @@ const truncateString = (str: string, maxLength = 50): string => {
 
 const DataTable: React.FC = () => {
   const { selectedCollection, viewMode, setViewMode } = useStore();
-  const { data, isLoading, isError, error, refetch } = useCollectionData(selectedCollection);
-  const [currentPage, setCurrentPage] = useState(1);
-  const recordsPerPage = 100;
+  const { 
+    data = [], 
+    isLoading, 
+    isError, 
+    error, 
+    refetch,
+    currentPage,
+    hasMore,
+    nextPage,
+    previousPage,
+    resetPagination
+  } = useCollectionData(selectedCollection);
   
   // Filter state
   const [showFilters, setShowFilters] = useState(false);
@@ -180,15 +189,15 @@ const DataTable: React.FC = () => {
   const [expandedJsonCells, setExpandedJsonCells] = useState<Set<string>>(new Set());
   const [jsonEditCell, setJsonEditCell] = useState<{rowId: string, field: string, value: any} | null>(null);
 
-  // Reset page when collection changes
+  // Reset filters when collection changes
   useEffect(() => {
-    setCurrentPage(1);
+    resetPagination();
     setFilters([]);
     setGlobalSearchTerm('');
     setShowFilters(false);
   }, [selectedCollection]);
 
-  // Apply filters to data
+  // Apply filters to current page data
   useEffect(() => {
     if (!data) {
       setFilteredData([]);
@@ -214,7 +223,7 @@ const DataTable: React.FC = () => {
         return filters.every(filter => {
           const fieldValue = item[filter.field];
           if (fieldValue === undefined || fieldValue === null) {
-            return filter.operator === 'notEquals'; // Only "not equals" passes for null/undefined
+            return filter.operator === 'notEquals';
           }
           
           const itemValue = String(fieldValue).toLowerCase();
@@ -249,44 +258,10 @@ const DataTable: React.FC = () => {
     setFilteredData(result);
   }, [data, filters, globalSearchTerm]);
 
-  // Calculate pagination details
-  const totalRecords = filteredData?.length || 0;
-  const totalPages = Math.ceil(totalRecords / recordsPerPage);
-  const startIndex = (currentPage - 1) * recordsPerPage;
-  const endIndex = Math.min(startIndex + recordsPerPage, totalRecords);
-  const currentData = filteredData?.slice(startIndex, endIndex) || [];
-
-  // Handle page change
-  const handlePageChange = (_: any, value: number) => {
-    setCurrentPage(value);
-  };
-
-  // Navigate to next/previous page
-  const handleNextPage = () => {
-    if (currentPage < totalPages) {
-      setCurrentPage(currentPage + 1);
-    }
-  };
-
-  const handlePrevPage = () => {
-    if (currentPage > 1) {
-      setCurrentPage(currentPage - 1);
-    }
-  };
-
-  const handleFirstPage = () => {
-    setCurrentPage(1);
-  };
-
-  const handleLastPage = () => {
-    setCurrentPage(totalPages);
-  };
-
   // Extract column headers from data
   const columns = useMemo(() => {
     if (!data || data.length === 0) return ['id'];
     
-    // Get all unique keys from all documents
     const allKeys = new Set<string>();
     allKeys.add('id'); // Always include ID
     
@@ -298,6 +273,9 @@ const DataTable: React.FC = () => {
     
     return Array.from(allKeys);
   }, [data]);
+
+  // Use filteredData for display
+  const displayData = filteredData;
 
   // Format cell data appropriately based on type
   const formatCellData = (value: any, rowId: string, field: string): React.ReactNode => {
@@ -745,6 +723,77 @@ const DataTable: React.FC = () => {
         </Button>
       </Box>
 
+      {/* Pagination Controls */}
+      <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Typography variant="caption" color="text.secondary">
+          Page {currentPage} • Showing {filteredData.length} records {hasMore ? '(More available)' : '(End of collection)'}
+        </Typography>
+        <Box>
+          <Button
+            onClick={previousPage}
+            disabled={currentPage === 1 || isLoading}
+            startIcon={<NavigateBeforeIcon />}
+            size="small"
+            variant="outlined"
+          >
+            Previous
+          </Button>
+          <Button
+            onClick={nextPage}
+            disabled={!hasMore || isLoading}
+            endIcon={<NavigateNextIcon />}
+            size="small"
+            variant="outlined"
+            sx={{ ml: 1 }}
+          >
+            Next
+          </Button>
+        </Box>
+      </Box>
+
+      {/* Add Row Button */}
+      <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
+        <Button 
+          variant="contained" 
+          color="primary" 
+          startIcon={<AddIcon />}
+          onClick={() => {
+            // Initialize empty document with all possible fields
+            const emptyDoc: Record<string, any> = { id: '' };
+            columns.forEach(col => {
+              if (col !== 'id') {
+                emptyDoc[col] = '';
+              }
+            });
+            setNewRow(emptyDoc);
+            setIsAddMode(true);
+          }}
+        >
+          Add Document
+        </Button>
+      </Box>
+
+      {/* Table Instructions */}
+      <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: 'info.50' }}>
+        <Typography variant="subtitle2" color="info.main" gutterBottom>
+          <strong>Edit Data Instructions:</strong>
+        </Typography>
+        <Box component="ul" sx={{ pl: 2, m: 0 }}>
+          <Box component="li">
+            <Typography variant="body2">Double-click any cell to edit its value</Typography>
+          </Box>
+          <Box component="li">
+            <Typography variant="body2">Press Enter or click outside to save changes</Typography>
+          </Box>
+          <Box component="li">
+            <Typography variant="body2">Use the Delete button to remove a document</Typography>
+          </Box>
+          <Box component="li">
+            <Typography variant="body2">Click "Add Document" to create a new document</Typography>
+          </Box>
+        </Box>
+      </Paper>
+
       <Collapse in={showFilters}>
         <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -925,144 +974,6 @@ const DataTable: React.FC = () => {
         </Paper>
       </Collapse>
 
-      {/* Pagination information */}
-      <Box 
-        sx={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center', 
-          mb: 2 
-        }}
-      >
-        <Typography variant="body2">
-          <strong>Total Records:</strong> {totalRecords}
-        </Typography>
-
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="body2">
-            Showing {totalRecords > 0 ? startIndex + 1 : 0}-{endIndex} of {totalRecords} records
-          </Typography>
-          <Chip 
-            label={`Page ${currentPage} of ${totalPages || 1}`}
-            size="small" 
-            variant="outlined"
-            color="primary"
-          />
-        </Box>
-      </Box>
-
-      {/* Navigation controls */}
-      <Box 
-        sx={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center', 
-          mb: 2 
-        }}
-      >
-        <ButtonGroup variant="outlined" size="small">
-          <Tooltip title="First Page">
-            <span>
-              <IconButton 
-                onClick={handleFirstPage} 
-                disabled={currentPage === 1 || totalRecords === 0}
-                size="small"
-              >
-                <FirstPageIcon />
-              </IconButton>
-            </span>
-          </Tooltip>
-          <Tooltip title="Previous 100 Records">
-            <span>
-              <IconButton 
-                onClick={handlePrevPage} 
-                disabled={currentPage === 1 || totalRecords === 0}
-                size="small"
-              >
-                <NavigateBeforeIcon />
-              </IconButton>
-            </span>
-          </Tooltip>
-          <Tooltip title="Next 100 Records">
-            <span>
-              <IconButton 
-                onClick={handleNextPage} 
-                disabled={currentPage === totalPages || totalRecords === 0}
-                size="small"
-              >
-                <NavigateNextIcon />
-              </IconButton>
-            </span>
-          </Tooltip>
-          <Tooltip title="Last Page">
-            <span>
-              <IconButton 
-                onClick={handleLastPage} 
-                disabled={currentPage === totalPages || totalRecords === 0}
-                size="small"
-              >
-                <LastPageIcon />
-              </IconButton>
-            </span>
-          </Tooltip>
-        </ButtonGroup>
-
-        {totalPages > 1 && (
-          <Pagination 
-            count={totalPages} 
-            page={currentPage} 
-            onChange={handlePageChange} 
-            color="primary" 
-            size="small"
-            siblingCount={1}
-            boundaryCount={1}
-          />
-        )}
-      </Box>
-
-      {/* Add Row Button */}
-      <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
-        <Button 
-          variant="contained" 
-          color="primary" 
-          startIcon={<AddIcon />}
-          onClick={() => {
-            // Initialize empty document with all possible fields
-            const emptyDoc: Record<string, any> = { id: '' };
-            columns.forEach(col => {
-              if (col !== 'id') {
-                emptyDoc[col] = '';
-              }
-            });
-            setNewRow(emptyDoc);
-            setIsAddMode(true);
-          }}
-        >
-          Add Document
-        </Button>
-      </Box>
-
-      {/* Table Instructions */}
-      <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: 'info.50' }}>
-        <Typography variant="subtitle2" color="info.main" gutterBottom>
-          <strong>Edit Data Instructions:</strong>
-        </Typography>
-        <Box component="ul" sx={{ pl: 2, m: 0 }}>
-          <Box component="li">
-            <Typography variant="body2">Double-click any cell to edit its value</Typography>
-          </Box>
-          <Box component="li">
-            <Typography variant="body2">Press Enter or click outside to save changes</Typography>
-          </Box>
-          <Box component="li">
-            <Typography variant="body2">Use the Delete button to remove a document</Typography>
-          </Box>
-          <Box component="li">
-            <Typography variant="body2">Click "Add Document" to create a new document</Typography>
-          </Box>
-        </Box>
-      </Paper>
-
       {/* Main content - Table or JSON view based on viewMode */}
       {viewMode === 'table' ? (
         <TableContainer 
@@ -1070,9 +981,9 @@ const DataTable: React.FC = () => {
           sx={{ 
             width: '100%',
             overflow: 'auto',
-            maxHeight: '70vh', // Limit the height for better usability
+            maxHeight: '70vh',
             border: (theme) => `1px solid ${theme.palette.divider}`,
-            position: 'relative', // Important for sticky positioning context
+            position: 'relative',
             '&::-webkit-scrollbar': {
               height: '8px',
               width: '8px',
@@ -1121,7 +1032,7 @@ const DataTable: React.FC = () => {
               </StyledTableRow>
             </TableHead>
             <TableBody>
-              {currentData.length === 0 ? (
+              {displayData.length === 0 ? (
                 <StyledTableRow>
                   <StyledTableCell colSpan={columns.length + 1} align="center">
                     <Typography variant="body2" sx={{ py: 2 }}>
@@ -1132,7 +1043,7 @@ const DataTable: React.FC = () => {
                   </StyledTableCell>
                 </StyledTableRow>
               ) : (
-                currentData.map((row: FirestoreData) => (
+                displayData.map((row: FirestoreData) => (
                   <StyledTableRow key={row.id}>
                     {columns.map((column) => (
                       <StyledTableCell key={`${row.id}-${column}`}>
@@ -1276,7 +1187,7 @@ const DataTable: React.FC = () => {
       ) : (
         // JSON View
         <Box sx={{ mt: 2 }}>
-          {currentData.length === 0 ? (
+          {displayData.length === 0 ? (
             <Paper sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="body2">
                 {globalSearchTerm || filters.length > 0 
@@ -1286,7 +1197,7 @@ const DataTable: React.FC = () => {
             </Paper>
           ) : (
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 2 }}>
-              {currentData.map((item: FirestoreData) => (
+              {displayData.map((item: FirestoreData) => (
                 <Card key={item.id} variant="outlined">
                   <CardContent sx={{ p: 2, pb: 0 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
@@ -1326,24 +1237,32 @@ const DataTable: React.FC = () => {
         </Box>
       )}
 
-      {/* Bottom pagination controls */}
-      {totalPages > 1 && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-          <Pagination 
-            count={totalPages} 
-            page={currentPage} 
-            onChange={handlePageChange} 
-            color="primary"
-            size="small"
-          />
-        </Box>
-      )}
-
-      {/* Record display info footer */}
-      <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+      {/* Bottom Pagination Controls */}
+      <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography variant="caption" color="text.secondary">
-          Displaying {currentData.length} of {totalRecords} records (max 100 per page)
+          Page {currentPage} • Showing {filteredData.length} records {hasMore ? '(More available)' : '(End of collection)'}
         </Typography>
+        <Box>
+          <Button
+            onClick={previousPage}
+            disabled={currentPage === 1 || isLoading}
+            startIcon={<NavigateBeforeIcon />}
+            size="small"
+            variant="outlined"
+          >
+            Previous
+          </Button>
+          <Button
+            onClick={nextPage}
+            disabled={!hasMore || isLoading}
+            endIcon={<NavigateNextIcon />}
+            size="small"
+            variant="outlined"
+            sx={{ ml: 1 }}
+          >
+            Next
+          </Button>
+        </Box>
       </Box>
 
       {/* JSON Detail Dialog */}

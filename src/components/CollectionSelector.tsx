@@ -19,12 +19,15 @@ import {
   ListItemIcon,
   ListItemText,
   Paper,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import StorageIcon from '@mui/icons-material/Storage';
+import EditIcon from '@mui/icons-material/Edit';
 import { useStore } from '../store';
 import { useCollections } from '../hooks/useFirestore';
 
@@ -36,6 +39,8 @@ const CollectionSelector: React.FC = () => {
   const [showChips, setShowChips] = useState(true);
   const [isTimedOut, setIsTimedOut] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [manualMode, setManualMode] = useState(false);
+  const [manualCollection, setManualCollection] = useState('');
   
   // Set a timeout for the loading state to detect potential issues
   useEffect(() => {
@@ -52,6 +57,13 @@ const CollectionSelector: React.FC = () => {
       if (timeoutId) clearTimeout(timeoutId);
     };
   }, [isLoading]);
+
+  // Initialize manual input with selected collection when switching to manual mode
+  useEffect(() => {
+    if (manualMode && selectedCollection) {
+      setManualCollection(selectedCollection);
+    }
+  }, [manualMode, selectedCollection]);
   
   // Group collections by type (top-level vs subcollections)
   const topLevelCollections = collections.filter(c => !c.includes('/'));
@@ -91,6 +103,21 @@ const CollectionSelector: React.FC = () => {
   
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(event.target.value);
+  };
+
+  const handleManualInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setManualCollection(event.target.value);
+  };
+
+  const handleManualInputSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (manualCollection.trim()) {
+      setSelectedCollection(manualCollection.trim());
+    }
+  };
+
+  const toggleInputMode = () => {
+    setManualMode(!manualMode);
   };
 
   if (isError) {
@@ -173,16 +200,29 @@ const CollectionSelector: React.FC = () => {
         <Typography variant="subtitle1" component="div" sx={{ fontWeight: 'medium' }}>
           Firestore Collections {collections.length > 0 && `(${collections.length})`}
         </Typography>
-        <Tooltip title="Refresh collections">
-          <IconButton 
-            onClick={handleRefresh} 
-            size="small" 
-            color="primary"
-            disabled={isLoading && !isTimedOut}
-          >
-            <RefreshIcon />
-          </IconButton>
-        </Tooltip>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <FormControlLabel
+            control={
+              <Switch 
+                size="small" 
+                checked={manualMode}
+                onChange={toggleInputMode}
+              />
+            }
+            label={<Typography variant="caption">Manual Input</Typography>}
+            sx={{ mr: 1 }}
+          />
+          <Tooltip title="Refresh collections">
+            <IconButton 
+              onClick={handleRefresh} 
+              size="small" 
+              color="primary"
+              disabled={isLoading && !isTimedOut}
+            >
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
+        </Box>
       </Box>
       
       {/* Loading indicator with timeout warning */}
@@ -212,7 +252,7 @@ const CollectionSelector: React.FC = () => {
       )}
       
       {/* Search box for collections */}
-      {collections.length > 5 && (
+      {!manualMode && collections.length > 5 && (
         <TextField
           placeholder="Search collections..."
           variant="outlined"
@@ -231,80 +271,87 @@ const CollectionSelector: React.FC = () => {
         />
       )}
       
+      {/* Manual Collection Input */}
+      {manualMode && (
+        <form onSubmit={handleManualInputSubmit}>
+          <TextField
+            label="Collection Path"
+            placeholder="Enter collection path (e.g. users or posts/postId/comments)"
+            variant="outlined"
+            size="small"
+            fullWidth
+            value={manualCollection}
+            onChange={handleManualInputChange}
+            sx={{ mb: 2 }}
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <Tooltip title="Load this collection">
+                    <IconButton 
+                      type="submit"
+                      edge="end" 
+                      size="small"
+                      disabled={!manualCollection.trim()}
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </InputAdornment>
+              ),
+            }}
+          />
+        </form>
+      )}
+      
       {/* Collection selector */}
-      <FormControl fullWidth variant="outlined">
-        <InputLabel id="collection-select-label">Select Collection</InputLabel>
-        <Select
-          labelId="collection-select-label"
-          id="collection-select"
-          value={selectedCollection}
-          onChange={handleChange}
-          onClose={closeDropdown}
-          open={isDropdownOpen}
-          onOpen={openDropdown}
-          label="Select Collection"
-          disabled={isLoading || collections.length === 0}
-          startAdornment={
-            isLoading ? 
-            <CircularProgress size={20} color="inherit" sx={{ mr: 1 }} /> : 
-            null
-          }
-          MenuProps={{
-            PaperProps: {
-              style: { maxHeight: 500 },
-            },
-            autoFocus: false,
-            disableAutoFocusItem: true,
-            disablePortal: true,
-            anchorOrigin: {
-              vertical: 'bottom',
-              horizontal: 'left',
-            },
-            transformOrigin: {
-              vertical: 'top',
-              horizontal: 'left',
-            },
-          }}
-          inputProps={{
-            'data-testid': 'collection-select',
-          }}
-        >
-          {filteredCollections.length === 0 && !isLoading ? (
-            <MenuItem disabled value="">
-              <em>No collections found</em>
-            </MenuItem>
-          ) : (
-            <>
-              {/* Top-level collections first */}
-              {topLevelCollections
-                .filter(collection => collection.toLowerCase().includes(searchTerm.toLowerCase()))
-                .map((collection) => (
-                  <MenuItem 
-                    key={collection} 
-                    value={collection}
-                    onClick={() => {
-                      setSelectedCollection(collection);
-                      closeDropdown();
-                    }}
-                  >
-                    {collection}
-                  </MenuItem>
-                ))
-              }
-              
-              {/* Then subcollections with grouping if there are any */}
-              {subCollections.length > 0 && topLevelCollections.length > 0 && (
-                <MenuItem disabled divider>
-                  <em>Subcollections</em>
-                </MenuItem>
-              )}
-              
-              {subCollections
-                .filter(collection => collection.toLowerCase().includes(searchTerm.toLowerCase()))
-                .map((collection) => {
-                  // For subcollections, format them to show the path clearly
-                  const parts = collection.split('/');
-                  return (
+      {!manualMode && (
+        <FormControl fullWidth variant="outlined">
+          <InputLabel id="collection-select-label">Select Collection</InputLabel>
+          <Select
+            labelId="collection-select-label"
+            id="collection-select"
+            value={selectedCollection}
+            onChange={handleChange}
+            onClose={closeDropdown}
+            open={isDropdownOpen}
+            onOpen={openDropdown}
+            label="Select Collection"
+            disabled={isLoading || collections.length === 0}
+            startAdornment={
+              isLoading ? 
+              <CircularProgress size={20} color="inherit" sx={{ mr: 1 }} /> : 
+              null
+            }
+            MenuProps={{
+              PaperProps: {
+                style: { maxHeight: 500 },
+              },
+              autoFocus: false,
+              disableAutoFocusItem: true,
+              disablePortal: true,
+              anchorOrigin: {
+                vertical: 'bottom',
+                horizontal: 'left',
+              },
+              transformOrigin: {
+                vertical: 'top',
+                horizontal: 'left',
+              },
+            }}
+            inputProps={{
+              'data-testid': 'collection-select',
+            }}
+          >
+            {filteredCollections.length === 0 && !isLoading ? (
+              <MenuItem disabled value="">
+                <em>No collections found</em>
+              </MenuItem>
+            ) : (
+              <>
+                {/* Top-level collections first */}
+                {topLevelCollections
+                  .filter(collection => collection.toLowerCase().includes(searchTerm.toLowerCase()))
+                  .map((collection) => (
                     <MenuItem 
                       key={collection} 
                       value={collection}
@@ -313,30 +360,57 @@ const CollectionSelector: React.FC = () => {
                         closeDropdown();
                       }}
                     >
-                      <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-                        <Typography variant="body2">{parts[2]}</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {`${parts[0]}/${parts[1]}/...`}
-                        </Typography>
-                      </Box>
+                      {collection}
                     </MenuItem>
-                  );
-                })
-              }
-            </>
-          )}
-        </Select>
-      </FormControl>
+                  ))
+                }
+                
+                {/* Then subcollections with grouping if there are any */}
+                {subCollections.length > 0 && topLevelCollections.length > 0 && (
+                  <MenuItem disabled divider>
+                    <em>Subcollections</em>
+                  </MenuItem>
+                )}
+                
+                {subCollections
+                  .filter(collection => collection.toLowerCase().includes(searchTerm.toLowerCase()))
+                  .map((collection) => {
+                    // For subcollections, format them to show the path clearly
+                    const parts = collection.split('/');
+                    return (
+                      <MenuItem 
+                        key={collection} 
+                        value={collection}
+                        onClick={() => {
+                          setSelectedCollection(collection);
+                          closeDropdown();
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                          <Typography variant="body2">{parts[2]}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {`${parts[0]}/${parts[1]}/...`}
+                          </Typography>
+                        </Box>
+                      </MenuItem>
+                    );
+                  })
+                }
+              </>
+            )}
+          </Select>
+        </FormControl>
+      )}
       
       {/* Display stats and status if collections were loaded */}
-      {failureCount > 0 && collections.length > 0 && (
+      {failureCount > 0 && collections.length > 0 && !manualMode && (
         <Alert severity="info" sx={{ mt: 2, fontSize: '0.875rem' }}>
           Some collection discovery requests may have timed out, but {collections.length} collections were found.
         </Alert>
       )}
       
       {/* Collection chips */}
-      {collections.length > 0 && (
+      {collections.length > 0 && !manualMode && (
         <Box sx={{ mt: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
@@ -393,22 +467,29 @@ const CollectionSelector: React.FC = () => {
         </Box>
       )}
       
-      {collections.length > 0 && (
-        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      {/* Info display at bottom */}
+      <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        {!manualMode && collections.length > 0 && (
           <Typography variant="caption" color="text.secondary">
             {topLevelCollections.length} root collections, {subCollections.length} subcollections
           </Typography>
-          
-          {selectedCollection && (
-            <Chip
-              label={`Selected: ${selectedCollection}`}
-              size="small"
-              color="primary"
-              variant="outlined"
-            />
-          )}
-        </Box>
-      )}
+        )}
+        
+        {manualMode && (
+          <Typography variant="caption" color="text.secondary">
+            Manual collection input mode - type any valid collection path
+          </Typography>
+        )}
+        
+        {selectedCollection && (
+          <Chip
+            label={`Selected: ${selectedCollection}`}
+            size="small"
+            color="primary"
+            variant="outlined"
+          />
+        )}
+      </Box>
     </Box>
   );
 };
